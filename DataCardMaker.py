@@ -2,13 +2,15 @@ import ROOT
 ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
 import json
 import sys
+import ctypes  
 from array import array
+from Fitter import Fitter
 ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.WARNING)
 
 class DataCardMaker:
     def __init__(self,tag):
         self.systematics=[]
-        self.tag="JJ"+"_"+tag
+        self.tag="mumu"+"_"+tag
         self.rootFile = ROOT.TFile("datacardInputs_%s.root"%self.tag,"RECREATE")
         self.rootFile.cd()
         self.w=ROOT.RooWorkspace("w","w")
@@ -17,10 +19,14 @@ class DataCardMaker:
         self.systematics=[]
 
     def delete(self):
-        if self.w: 
-            self.w.Delete()
-            self.rootFile.Close()
-            self.rootFile.Delete()
+        #if self.w: 
+        #    try:
+        #        self.w.Delete()
+        #        self.rootFile.Close()
+        #        self.rootFile.Delete()
+        #    except:
+        #        print("Delete ws")
+        return
       
     def makeCard(self):
 
@@ -135,7 +141,7 @@ class DataCardMaker:
             mjj=self.w.var(p)
         dataHist = ROOT.RooDataHist(name, name, cList, histogram)
         #dataHist=ROOT.RooDataHist(name, name, ROOT.RooArgList(mjj), ROOT.RooFit.Import(histogram)) 
-        getattr(self.w,'import')(dataHist,ROOT.RooFit.RenameVariable(name,name))
+        getattr(self.w,'import')(dataHist)
     
     def addSystematic(self,name,kind,values,bin="",process="",variables="",addPar = ""):
         if kind != 'rateParam': self.systematics.append({'name':name,'kind':kind,'values':values })
@@ -193,47 +199,49 @@ class DataCardMaker:
         alpha_twoG = f.Get('alpha2')
         sign_twoG = f.Get('sign2')
 
-        x = ROOT.Double(0.)
-        mean = ROOT.Double(0.)
+        x = ctypes.c_double(0.0)
+        mean = ctypes.c_double(0.0)
         meanG.GetPoint(0,x,mean)
-        sigma = ROOT.Double(0.)
+        sigma = ctypes.c_double(0.0)
         sigmaG.GetPoint(0,x,sigma)
-        alpha_one = ROOT.Double(0.)
+        alpha_one = ctypes.c_double(0.0)
         alpha_oneG.GetPoint(0, x, alpha_one)
-        alpha_two = ROOT.Double(0.)
+        alpha_two = ctypes.c_double(0.0)
         alpha_twoG.GetPoint(0, x, alpha_two)
-        sign_one = ROOT.Double(0.)
+        sign_one = ctypes.c_double(0.0)
         sign_oneG.GetPoint(0,x,sign_one)
-        sign_two = ROOT.Double(0.)
+        sign_two = ctypes.c_double(0.0)
         sign_twoG.GetPoint(0,x,sign_two)
 
-        meanVar = "_".join(["MEAN", name, self.tag])
-        self.w.factory(
-            "expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(
-                name=meanVar, param=mean, vv_syst=scaleStr,
-                vv_systs=','.join(scaleSysts)))
+        print("adding mean")
+        meanVar = "_".join(["MEAN",name,self.tag])
+        meanRaw = "_".join(["MEANRAW",name,self.tag])
+        meanRaw_root = ROOT.RooRealVar(meanRaw, meanRaw,mean)
+        getattr(self.w, "import")(meanRaw_root)
+        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=meanVar,param=meanRaw,vv_syst=scaleStr,vv_systs=','.join(scaleSysts)))
 
-        sigmaVar = "_".join(["SIGMA", name, self.tag])
-        self.w.factory(
-            "expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(
-                name=sigmaVar, param=sigma, vv_syst=resolutionStr,
-                vv_systs=','.join(resolutionSysts)))
+        print("adding sigma")
+        sigmaVar = "_".join(["SIGMA",name,self.tag])
+        sigmaRaw = "_".join(["sigmaRAW",name,self.tag])
+        sigmaRaw_root = ROOT.RooRealVar(sigmaRaw, sigmaRaw,sigma)
+        getattr(self.w, "import")(sigmaRaw_root)
+        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=sigmaVar,param=sigmaRaw,vv_syst=resolutionStr,vv_systs=','.join(resolutionSysts)))
 
         alphaOneVar = "_".join(["ALPHAONE", name, self.tag])        
         alpha_one = ROOT.RooRealVar(alphaOneVar,alphaOneVar,alpha_one)
-        getattr(self.w, 'import')(alpha_one, ROOT.RooFit.Rename(alphaOneVar))
+        getattr(self.w, 'import')(alpha_one)
 
         alphaTwoVar = "_".join(["ALPHATWO", name, self.tag])        
         alpha_two = ROOT.RooRealVar(alphaTwoVar, alphaTwoVar, alpha_two)
-        getattr(self.w, 'import')(alpha_two, ROOT.RooFit.Rename(alphaTwoVar))
+        getattr(self.w, 'import')(alpha_two)
         
         signOneVar = "_".join(["SIGNONE", name, self.tag])
         sign_one = ROOT.RooRealVar(signOneVar, signOneVar, sign_one)    
-        getattr(self.w, 'import')(sign_one, ROOT.RooFit.Rename(signOneVar))
+        getattr(self.w, 'import')(sign_one)
         
         signTwoVar = "_".join(["SIGNTWO", name, self.tag])
         sign_two = ROOT.RooRealVar(signTwoVar, signTwoVar, sign_two)    
-        getattr(self.w, 'import')(sign_two, ROOT.RooFit.Rename(signTwoVar))
+        getattr(self.w, 'import')(sign_two)
         
         #dcbFunc = "_".join(["dcb", name, self.tag])
         #import pdb; pdb.set_trace()
@@ -242,7 +250,7 @@ class DataCardMaker:
                                       self.w.function(sigmaVar), alpha_one,
                                       sign_one, alpha_two, sign_two)
 
-        getattr(self.w, 'import')(dcb, ROOT.RooFit.Rename(pdfName))
+        getattr(self.w, 'import')(dcb)
         return dcb
 
 
@@ -277,121 +285,93 @@ class DataCardMaker:
         sigfracG = f.Get('sigfrac')
         signG = f.Get('sign')
         
-        x = ROOT.Double(0.)
-        mean = ROOT.Double(0.)
+        x = ctypes.c_double(0.0)
+        mean = ctypes.c_double(0.0)
         meanG.GetPoint(0,x,mean)
-        sigma = ROOT.Double(0.)
+
+        sigma = ctypes.c_double(0.0)
         sigmaG.GetPoint(0,x,sigma)  
-        alpha = ROOT.Double(0.)
+        alpha = ctypes.c_double(0.0)
         alphaG.GetPoint(0,x,alpha)
-        scalesigma = ROOT.Double(0.)
+        scalesigma = ctypes.c_double(0.0)
         scalesigmaG.GetPoint(0,x,scalesigma)
-        sigfrac = ROOT.Double(0.)
+        sigfrac = ctypes.c_double(0.0)
         sigfracG.GetPoint(0,x,sigfrac)
-        sign = ROOT.Double(0.)
+        sign = ctypes.c_double(0.0)
         signG.GetPoint(0,x,sign)
             
         
+        print("adding mean")
         meanVar = "_".join(["MEAN",name,self.tag])
-        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=meanVar,param=mean,vv_syst=scaleStr,vv_systs=','.join(scaleSysts)))
+        meanRaw = "_".join(["MEANRAW",name,self.tag])
+        meanRaw_root = ROOT.RooRealVar(meanRaw, meanRaw,mean)
+        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=meanVar,param=meanRaw,vv_syst=scaleStr,vv_systs=','.join(scaleSysts)))
 
+        print("adding sigma")
         sigmaVar = "_".join(["SIGMA",name,self.tag])
-        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=sigmaVar,param=sigma,vv_syst=resolutionStr,vv_systs=','.join(resolutionSysts)))
+        sigmaRaw = "_".join(["sigmaRAW",name,self.tag])
+        sigmaRaw_root = ROOT.RooRealVar(sigmaRaw, sigmaRaw,sigma)
+        self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=sigmaVar,param=sigmaRaw,vv_syst=resolutionStr,vv_systs=','.join(resolutionSysts)))
             
+        print("adding others")
         alphaVar = "_".join(["ALPHA",name,self.tag])        
         alpha = ROOT.RooRealVar(alphaVar,alphaVar,alpha)
-        getattr(self.w,'import')(alpha,ROOT.RooFit.Rename(alphaVar))
+        getattr(self.w,'import')(alpha)
         
         sigfracVar = "_".join(["SIGFRAC",name,self.tag])
         sigfrac = ROOT.RooRealVar(sigfracVar,sigfracVar,sigfrac)
-        getattr(self.w,'import')(sigfrac,ROOT.RooFit.Rename(sigfracVar))
+        getattr(self.w,'import')(sigfrac)
         
         scalesigmaVar = "_".join(["SCALESIGMA",name,self.tag])
         scalesigma = ROOT.RooRealVar(scalesigmaVar,scalesigmaVar,scalesigma)
-        getattr(self.w,'import')(scalesigma,ROOT.RooFit.Rename(scalesigmaVar))
+        getattr(self.w,'import')(scalesigma)
         
         signVar = "_".join(["SIGN",name,self.tag])
         sign = ROOT.RooRealVar(signVar,signVar,sign)    
-        getattr(self.w,'import')(sign,ROOT.RooFit.Rename(signVar))
+        getattr(self.w,'import')(sign)
 
         gsigmaVar = "_".join(["GSIGMA",name,self.tag])      
         gsigma = ROOT.RooFormulaVar(gsigmaVar,"@0*@1", ROOT.RooArgList(self.w.function(sigmaVar),scalesigma))
-        #getattr(self.w,'import')(gsigma,ROOT.RooFit.Rename(gsigmaVar))      
+        #getattr(self.w,'import')(gsigma)
 
         gaussFunc = "_".join(["gauss",name,self.tag])   
         gauss = ROOT.RooGaussian(gaussFunc, gaussFunc, self.w.var(variable), self.w.function(meanVar), gsigma)
         cbFunc = "_".join(["cb",name,self.tag])
         cb    = ROOT.RooCBShape(cbFunc, cbFunc,self.w.var(variable), self.w.function(meanVar), self.w.function(sigmaVar), alpha, sign)
         model = ROOT.RooAddPdf(pdfName, pdfName, gauss, cb, self.w.var(sigfracVar)) 
-        getattr(self.w,'import')(model,ROOT.RooFit.Rename(pdfName))
+        getattr(self.w,'import')(model)
         return model
 
-    def addQCDShape(self,name,variable,preconstrains,nPars=4):
+    def addBkgShapeNoTag(self,name,variable,preconstrains, func_form = "bern",   order=4):
 
         pdfName=name+"_"+self.tag
     
         MVV=variable
         if self.w.var(MVV) == None: self.w.factory(MVV+"[0,10000]")
-    
-        f = ROOT.TFile.Open(preconstrains,'READ')
-        parsG = [f.Get('p%i'%i) for i in range(1,nPars+1)]
-        pars_val = [ROOT.Double(0.) for i in range(0,nPars)]       
-        for i in range(1,nPars+1):
-            x = ROOT.Double(0.)
-            parsG[i-1].GetPoint(0,x,pars_val[i-1])
-            pName="_".join(["CMS_JJ_p%i"%i,self.tag])
-            errUp=pars_val[i-1]+parsG[i-1].GetErrorYhigh(0)*100.
-            errDown=pars_val[i-1]-parsG[i-1].GetErrorYlow(0)*100.
-            print (i,pName,pars_val[i-1],parsG[i-1].GetErrorYhigh(0),parsG[i-1].GetErrorYlow(0),errUp,errDown)
-            self.w.factory("{name}[{val},{errDown},{errUp}]".format(name=pName,val=pars_val[i-1],errUp=errUp,errDown=errDown))
-    
-        if nPars==2: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/pow(@0/13000., @2)", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1_%s"%self.tag), self.w.var("CMS_JJ_p2_%s"%self.tag)))  
-        elif nPars==3: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/pow(@0/13000., @2+@3*log(@0/13000.))", 
-            ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1_%s"%self.tag), self.w.var("CMS_JJ_p2_%s"%self.tag), self.w.var("CMS_JJ_p3_%s"%self.tag)))
-        elif nPars==4: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-            ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1_%s"%self.tag), self.w.var("CMS_JJ_p2_%s"%self.tag), self.w.var("CMS_JJ_p3_%s"%self.tag), self.w.var("CMS_JJ_p4_%s"%self.tag)))
-        elif nPars==5: model = ROOT.RooGenericPdf(pdfName, "pow(exp(-@0/13000.),@5) * pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-            ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1_%s"%self.tag), self.w.var("CMS_JJ_p2_%s"%self.tag), self.w.var("CMS_JJ_p3_%s"%self.tag), 
-                self.w.var("CMS_JJ_p4_%s"%self.tag), self.w.var("CMS_JJ_p5_%s"%self.tag) ))
-        elif nPars==6: model = ROOT.RooGenericPdf(pdfName, "(0.5*tanh((@0-@6)/@5) + .5)*pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1_%s"%self.tag), self.w.var("CMS_JJ_p2_%s"%self.tag), self.w.var("CMS_JJ_p3_%s"%self.tag), 
-                self.w.var("CMS_JJ_p4_%s"%self.tag), self.w.var("CMS_JJ_p5_%s"%self.tag), self.w.var("CMS_JJ_p6_%s"%self.tag)))
 
-        getattr(self.w,'import')(model,ROOT.RooFit.Rename(pdfName))
+        poi = self.w.var(MVV)
 
-    def addQCDShapeNoTag(self,name,variable,preconstrains,nPars=4):
-
-        pdfName=name+"_"+self.tag
-    
-        MVV=variable
-        if self.w.var(MVV) == None: self.w.factory(MVV+"[0,10000]")
+        par_list = ROOT.RooArgList(poi)
     
         print("npars", nPars)
 
         print("fname ", preconstrains)
         f = ROOT.TFile.Open(preconstrains,'READ')
         f.ls()
-        parsG = [f.Get('p%i'%i) for i in range(1,nPars+1)]
+        parsG = [f.Get('p%i'%i) for i in range(nPars)]
         print(parsG)
-        pars_val = [ROOT.Double(0.) for i in range(0,nPars)]       
-        for i in range(1,nPars+1):
-            x = ROOT.Double(0.)
-            parsG[i-1].GetPoint(0,x,pars_val[i-1])
-            pName="CMS_JJ_p%i"%i
-            errUp=pars_val[i-1]+parsG[i-1].GetErrorYhigh(0)*100.
-            errDown=pars_val[i-1]-parsG[i-1].GetErrorYlow(0)*100.
-            print (i,pName,pars_val[i-1],parsG[i-1].GetErrorYhigh(0),parsG[i-1].GetErrorYlow(0),errUp,errDown)
-            self.w.factory("{name}[{val},{errDown},{errUp}]".format(name=pName,val=pars_val[i-1],errUp=errUp,errDown=errDown))
-    
-        if nPars==2: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/pow(@0/13000., @2)", ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1"), self.w.var("CMS_JJ_p2")))  
-        elif nPars==3: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/pow(@0/13000., @2+@3*log(@0/13000.))", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1"), self.w.var("CMS_JJ_p2"), self.w.var("CMS_JJ_p3")))
-        elif nPars==4: model = ROOT.RooGenericPdf(pdfName, "pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1"), self.w.var("CMS_JJ_p2"), self.w.var("CMS_JJ_p3"), self.w.var("CMS_JJ_p4")))
-        elif nPars==5: model = ROOT.RooGenericPdf(pdfName, " pow(exp(-@0/13000.), @4) * pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1"), self.w.var("CMS_JJ_p2"), self.w.var("CMS_JJ_p3"), self.w.var("CMS_JJ_p4"), self.w.var("CMS_JJ_p5")))
-        elif nPars==6: model = ROOT.RooGenericPdf(pdfName, "(0.5*tanh((@0-@6)/@5) + .5)*pow(1-@0/13000., @1)/ ( pow(@0/13000., @2+@3*log(@0/13000.)+@4*pow(log(@0/13000.),2)) )", 
-                ROOT.RooArgList(self.w.var(MVV), self.w.var("CMS_JJ_p1"), self.w.var("CMS_JJ_p2"), self.w.var("CMS_JJ_p3"), self.w.var("CMS_JJ_p4"), self.w.var("CMS_JJ_p5"), self.w.var("CMS_JJ_p6")))
+        pars_val = [ctypes.c_double(0.) for i in range(nPars)] 
+        for i in range(nPars):
+            x = ctypes.c_double(0.)
+            parsG[i].GetPoint(0,x,pars_val[i])
+            pName="CMS_bkg_p%i"%i
+            pars_val[i] = pars_val[i].value
+            errUp=pars_val[i]+parsG[i].GetErrorYhigh(0)*100.
+            errDown=pars_val[i]-parsG[i].GetErrorYlow(0)*100.
+            print (i,pName,pars_val[i],parsG[i].GetErrorYhigh(0),parsG[i].GetErrorYlow(0),errUp,errDown)
 
-        getattr(self.w,'import')(model,ROOT.RooFit.Rename(pdfName))
+        #TODO
+        #model = bernShape(self.w, name=pdfName, poi=self.w.var(MVV), order = order, start_vals = pars_vals)
+        model = None
+
+        getattr(self.w,'import')(model)

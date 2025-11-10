@@ -1,125 +1,13 @@
 import os
-from Fitter import Fitter
-from DataCardMaker import DataCardMaker
-from Utils import *
-from array import array
 import pickle
 import json
 import random
 import optparse
-import numpy as np
-
-import tdrstyle
-import ROOT
-ROOT.gStyle.SetOptStat(0)
-ROOT.gStyle.SetOptTitle(0)
-tdrstyle.setTDRStyle()
-ROOT.gROOT.SetBatch(True)
-ROOT.RooRandom.randomGenerator().SetSeed(random.randint(0, 1e+6))
-
-
-def fit_signalmodel(input_file, sig_file_name, mass, x_bins, fine_bins,
-                    plot_dir, return_fit=False, dcb_model=False, fit_range = 0.2, plot_label =""):
-    fine_bin_size = 4
-    bins_fine = int(x_bins[-1]-x_bins[0])//fine_bin_size
-
-    mlow = (1.0 - fit_range) * mass
-    mhigh = (1.0 + fit_range) * mass
-
-    bins_sig_fit = array(
-        'f', truncate(
-             [x_bins[0] + ib*fine_bin_size for ib in range(bins_fine + 1)],
-             mlow, mhigh)
-        )
-
-    large_bins_sig_fit = array('f', truncate(x_bins, mlow, mhigh))
-    roobins_sig_fit = ROOT.RooBinning(len(large_bins_sig_fit) - 1,
-                                      array('d', large_bins_sig_fit),
-                                      "mbins_sig")
-
-    histos_sig = ROOT.TH1F("m_sig", "m_sig",
-                           len(bins_sig_fit) - 1, bins_sig_fit)
-
-    load_h5_sig(input_file, histos_sig, mass, requireWindow = False)
-    sig_outfile = ROOT.TFile(sig_file_name, "RECREATE")
-    fitter = Fitter(['m_fine'])
-
-    if dcb_model:
-        fitter.signalDCB('model_s', "m_fine", mass)
-    else:
-        fitter.signalResonance('model_s', "m_fine", mass)
-
-    fitter.w.var("MH").setVal(mass)
-    fitter.importBinnedData(histos_sig, ['m_fine'], 'data')
-    fres = fitter.fit('model_s', 'data', [ROOT.RooFit.Save(1)])
-    if fres:
-        fname = sig_file_name.replace('.root', '.txt')
-        with open(fname, 'w') as f:
-            f.write('%d\n' % fres.status())
-    m_fine = fitter.getVar('m_fine')
-    m_fine.setBins(len(bins_sig_fit))
-
-    chi2_fine = fitter.projection("model_s", "data", "m_fine",
-                                  plot_dir + plot_label + "signal_fit.png")
-
-    fitter.projection("model_s", "data", "m_fine",
-                      plot_dir + plot_label +  "signal_fit_log.png", 0, True)
-
-    chi2 = fitter.projection("model_s", "data", "m_fine",
-                             plot_dir + plot_label + "signal_fit_binned.png",
-                             roobins_sig_fit)
-
-    fitter.projection("model_s", "data", "m_fine",
-                      plot_dir + plot_label + "signal_fit_log_binned.png",
-                      roobins_sig_fit, logy=True)
-
-    print("Fit done")
-    sig_outfile.cd()
-    histos_sig.Write()
-    print("cd, write")
-
-    if dcb_model:
-        graphs = {'mean': ROOT.TGraphErrors(),
-                  'sigma': ROOT.TGraphErrors(),
-                  'alpha': ROOT.TGraphErrors(),
-                  'alpha2': ROOT.TGraphErrors(),
-                  'sign': ROOT.TGraphErrors(),
-                  'sign2': ROOT.TGraphErrors()}
-    else:
-        graphs = {'mean': ROOT.TGraphErrors(),
-                  'sigma': ROOT.TGraphErrors(),
-                  'alpha': ROOT.TGraphErrors(),
-                  'sign': ROOT.TGraphErrors(),
-                  'scalesigma': ROOT.TGraphErrors(),
-                  'sigfrac': ROOT.TGraphErrors()}
-
-    for var, graph in graphs.items():
-        value, error = fitter.fetch(var)
-        graph.SetPoint(0, mass, value)
-        graph.SetPointError(0, 0.0, error)
-
-    sig_outfile.cd()
-    for name, graph in graphs.items():
-        graph.Write(name)
-        graph.Print()
-
-    sig_outfile.Close()
-
-    print (
-        """
-        #############################
-        signal fit chi2 (fine binning), %.3f
-        signal fit chi2 (large binning), %.3f
-        #############################
-        """ % (chi2_fine, chi2)
-        )
-
-    if return_fit:
-        print(fitter)
-        return fitter
-    else:
-        return None
-
+from Fitter import Fitter
+from DataCardMaker import DataCardMaker
+from Utils import *
+from array import array
+from fit_signalshapes import  fit_signalmodel
 
 def dofit(options):
 
@@ -135,9 +23,10 @@ def dofit(options):
         #remove old results
         os.system("rm %s" % plot_dir + "fit_results_{}.json".format(options.mass))
 
-    fine_bin_size = 0.2
+    fine_bin_size = 0.05
     mass = options.mass 
-    binsx = list(range(10, 50, 0.2))
+    #binsx = list(np.arange(11, 30, 0.5))
+    binsx = list(np.arange(11, 20, 0.5))
 
     if(options.m_max < 0. and options.rebin): 
         options.m_max = get_m_max(options.inputFile) + 5.0
@@ -173,11 +62,12 @@ def dofit(options):
 
     # round to smallest precision we are storing mass values with, otherwise
     # get weird effects related to bin size
-    roundTo(binsx, fine_bin_size)
+    #roundTo(binsx, fine_bin_size)
 
 
 
-    nbins_fine = int(binsx[-1] - binsx[0])/fine_bin_size
+    nbins_fine = int((binsx[-1] - binsx[0])/fine_bin_size)
+    print('nbins_fine', nbins_fine)
 
     histos_sb = ROOT.TH1F("m_sb", "m_sb" ,nbins_fine, binsx[0], binsx[-1])
     
@@ -214,46 +104,53 @@ def dofit(options):
 
 
     print("\n\n ############# FIT BACKGROUND AND SAVE PARAMETERS ###########")
-    #nParsToTry = [2, 3, 4, 5]
+    #orderToTry = [2, 3, 4, 5]
 
-    nParsToTry = [2, 3, 4]
-    #nParsToTry = [2]
-    chi2s = [0]*len(nParsToTry)
-    fit_params = [0] * len(nParsToTry)
-    ndofs = [0]*len(nParsToTry)
-    probs = [0]*len(nParsToTry)
-    fit_errs = [0]*len(nParsToTry)
-    bkg_fnames = [""]*len(nParsToTry)
+    #orderToTry = [2, 3, 4]
+    orderToTry = [3,4]
+    chi2s = [0]*len(orderToTry)
+    fit_params = [0] * len(orderToTry)
+    ndofs = [0]*len(orderToTry)
+    probs = [0]*len(orderToTry)
+    fit_errs = [0]*len(orderToTry)
+    bkg_fnames = [""]*len(orderToTry)
+
+    #polyExp, bern, exp, 
+    #func_form = "polyExp"
+    func_form = "exp"
+    #func_form = "bern"
 
 
     if options.blinded:
-        print("BLIND FIT LONGER SUPPORTED!")
+        print("BLIND FIT TO DO ")
         exit(1)
 
     fitting_histogram = histos_sb
     data_name = "data_bkg"
 
-    for i, nPars in enumerate(nParsToTry):
-        print("Trying %i parameter background fit" % nPars)
-        bkg_fnames[i] = str(nPars) + 'par_bkg_fit%i.root' % i
+    for i, order in enumerate(orderToTry):
+        print("Trying %i parameter background fit" % order)
+        bkg_fnames[i] = str(order) + 'par_bkg_fit%i.root' % i
         bkg_outfile = ROOT.TFile(bkg_fnames[i], 'RECREATE')
+
+        nPars = get_nPars(order, func_form)
 
         model_name = "model_b" + str(i)
         fitter_bkg = Fitter(['m_fine'], debug = False)
-        fitter_bkg.bkgShape(model_name, 'm_fine', nPars)
+        fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
         fitter_bkg.importBinnedData(fitting_histogram, ['m_fine'], data_name)
         
         fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
         #Running fit two times seems to improve things sometimes (better initial guesses for params?)
-        fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
+        #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
         chi2_fine = fitter_bkg.projection(
-            model_name, data_name, "m_fine",
-            plot_dir + str(nPars) + "par_bkg_fit.png", 0, True)
+            model=model_name, data=data_name, poi="m_fine",
+            filename=plot_dir + str(order) + "par_bkg_fit.png", binning=0, logy=False)
 
         #chi2_binned = fitter_bkg.projection(
         #     model_name, data_name, "m_fine",
-        #     plot_dir + str(nPars) + "par_bkg_fit_binnedx.png",roobins,True)
+        #     plot_dir + str(order) + "par_bkg_fit_binnedx.png",roobins,True)
 
 
         bkg_outfile.cd()
@@ -263,13 +160,13 @@ def dofit(options):
         model = fitter_bkg.getFunc(model_name)
         dataset = fitter_bkg.getData(data_name)
 
-        #rescale so pdfs are in evts per 100 GeV
+        #rescale so pdfs are in evts per 0.5 GeV
         fit_range_low = roobins.lowBound()
         fit_range_high = roobins.highBound()
         n = roobins.numBoundaries() - 1
         #RootFit default normalization is full range divided by number of bins
         default_norm = (fit_range_high - fit_range_low)/ n
-        rescale = 100./ default_norm
+        rescale = 0.5/ default_norm
         fit_norm = ROOT.RooFit.Normalization(rescale,ROOT.RooAbsReal.Relative)
 
         #use toys to sample errors rather than linear method, 
@@ -302,8 +199,6 @@ def dofit(options):
             dataset.plotOn(frame, ROOT.RooFit.Name(data_name),  ROOT.RooFit.XErrorSize(0), ROOT.RooFit.Binning(roobins), ROOT.RooFit.DataError(ROOT.RooAbsData.SumW2),
                        ROOT.RooFit.Rescale(rescale))
 
-
-
         useBinAverage = True
         hpull = frame.pullHist(data_name, model_name, useBinAverage)
         hresid = frame.residHist(data_name, model_name, False, useBinAverage)
@@ -324,6 +219,7 @@ def dofit(options):
 
 
         fit_hist = model.createHistogram("h_model_fit", m, ROOT.RooFit.Binning(roobins))
+        print("Hist fit norm", fit_hist.Integral())
         fit_hist.Scale(norm / fit_hist.Integral())
 
         #Get hist of pulls:  (data - fit) / tot_unc
@@ -338,21 +234,17 @@ def dofit(options):
 
         my_chi2, my_ndof = calculateChi2(hpull, nPars, excludeZeros = True, dataHist = dhist)
         my_prob = ROOT.TMath.Prob(my_chi2, my_ndof)
+
         PlotFitResults(frame, fres.GetName(), nPars, hresid_norm, data_name,
                        [model_name], my_chi2, my_ndof,
-                       str(nPars) + "par_bkg_fit_binned{}".format(
-                           "_blinded" if options.blinded else ""),
+                       f"{func_form}_order{order}_bkg_fit_binned",
                        plot_dir, plot_label = label)
 
+
+        #TODO
         graphs = {}
-        for p in range(nPars):
-            graphs['p%i' % (p + 1)] = ROOT.TGraphErrors()
-
-
-
-
-
-
+        for parName in fitter_bkg.par_names:
+            graphs[pa] = ROOT.TGraphErrors()
 
         #largest_frac_err = 0.
         bkg_fit_params = dict()
@@ -373,7 +265,7 @@ def dofit(options):
         bkg_outfile.Close()
 
         print("#############################")
-        print("% i Parameter results: " % nPars)
+        print("% Order %i results: " % order)
         print("bkg fit chi2/nbins (fine binning) ", chi2_fine)
         print("My chi2, ndof, prob", my_chi2, my_ndof, my_prob)
         print("My chi/ndof, chi2/nbins", my_chi2/my_ndof, my_chi2/(my_ndof + nPars))
@@ -386,6 +278,8 @@ def dofit(options):
         fit_params[i] = bkg_fit_params
         fit_errs[i] = bkg_fit_frac_err
         fitter_bkg.delete()
+
+    exit(1)
 
     best_i = f_test(nParsToTry, ndofs, chi2s, fit_errs, thresh = options.ftest_thresh, err_thresh = options.err_thresh)
     nPars_bkg = nParsToTry[best_i]
@@ -422,12 +316,14 @@ def dofit(options):
     card.addSystematic("CMS_scale_j", "param", [0.0, options.scale_j_unc])
     card.addSystematic("CMS_res_j", "param", [0.0, options.res_j_unc])
 
-    card.addbkgShapeNoTag('model_bkg_m', 'm', bkg_fname, nPars_bkg)
+    exit(1)
+    card.addBkgShapeNoTag('model_bkg_m', 'm', bkg_fname, order=order_bkg)
     card.addFloatingYield('model_bkg_m', 1, sb_fname, "m_sb")
-    for i in range(1, nPars_bkg + 1):
-        card.addSystematic("CMS_JJ_p%i" % i, "flatParam", [])
 
-    card.addSystematic("model_bkg_m_JJ_norm", "flatParam", [])
+    for i in range(0, nPars_bkg):
+        card.addSystematic("CMS_mumu_p%i" % i, "flatParam", [])
+
+    card.addSystematic("model_bkg_m_mumu_norm", "flatParam", [])
     card.importBinnedData("sb_fit.root", sig_data_name,
                           ["m"], 'data_obs', 1.0)
 
@@ -439,20 +335,20 @@ def dofit(options):
 
 
     cmd = (
-        "text2workspace.py datacard_JJ_{l2}.txt "
-        + "-o workspace_JJ_{l1}_{l2}.root "
-        + "&& combine -M FitDiagnostics workspace_JJ_{l1}_{l2}.root --cminPreFit 1 "
+        "text2workspace.py datacard_mumu_{l2}.txt "
+        + "-o workspace_mumu_{l1}_{l2}.root "
+        + "&& combine -M FitDiagnostics workspace_mumu_{l1}_{l2}.root --cminPreFit 1 "
         + "-m {mass} -n _{l1}_{l2} --robustFit 1"
-        + "&& combine -M Significance workspace_JJ_{l1}_{l2}.root --usePLC "
+        + "&& combine -M Significance workspace_mumu_{l1}_{l2}.root --usePLC "
         + "-m {mass} -n significance_{l1}_{l2} "
-        + "&& combine -M Significance workspace_JJ_{l1}_{l2}.root --usePLC "
+        + "&& combine -M Significance workspace_mumu_{l1}_{l2}.root --usePLC "
         + "-m {mass} --pvalue -n pvalue_{l1}_{l2} "
-        + "&& combine -M AsymptoticLimits workspace_JJ_{l1}_{l2}.root "
+        + "&& combine -M AsymptoticLimits workspace_mumu_{l1}_{l2}.root "
         + "-m {mass} -n lim_{l1}_{l2} "
         ).format(mass=mass, l1=label, l2=sb_label)
     print(cmd)
     os.system(cmd)
-    workspace_name = 'workspace_JJ_{l1}_{l2}.root'.format(l1=label, l2=sb_label)
+    workspace_name = 'workspace_mumu_{l1}_{l2}.root'.format(l1=label, l2=sb_label)
     sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, sb_label, bins, label + "_" + sb_label, nPars_bkg, 
             plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
 
@@ -494,7 +390,7 @@ def dofit(options):
     true_sig_strength = get_sig_in_window(options.inputFile, binsx[0], binsx[-1]) /  sig_norm
     print("True sig strength %.3f" % true_sig_strength)
 
-    cmd = ("combine -M Significance workspace_JJ_{l1}_{l2}.root -t -1 --expectSignal %.3f --toysFreq " % (true_sig_strength)
+    cmd = ("combine -M Significance workspace_mumu_{l1}_{l2}.root -t -1 --expectSignal %.3f --toysFreq " % (true_sig_strength)
         + "-m {mass} -n _exp_significance_{l1}_{l2} ").format(mass = mass, l1 = label, l2 = sb_label)
     print(cmd)
     os.system(cmd)
@@ -589,11 +485,8 @@ def dofit(options):
     results['m_max'] = options.m_max
     results['script_options'] = vars(options)
 
-    print("Saving fit results to %s" % plot_dir + "fit_results_{}.pkl".format(options.mass))
-    with open(plot_dir + "fit_results_{}.pkl".format(options.mass), "w") as f:
-        pickle.dump(results, f)
+    print("Saving fit results to %s" % plot_dir + "fit_results_{}.json".format(options.mass))
         
-    print("Also saving fit results to %s" % plot_dir + "fit_results_{}.json".format(options.mass))
     with open(plot_dir + "fit_results_{}.json".format(options.mass), "w") as jsonfile:
         json.dump(results, jsonfile, indent=4)
 
@@ -611,21 +504,21 @@ def fitting_options():
                       help="Minimum m for the fit")
     parser.add_option("--m_max", type=float, default=-1.0,
                       help="Maximum m for the fit")
-    parser.add_option("--sig_norm", type=float, default=1680.0,
-                      help="Scale signal pdf normalization by this amount")
+    parser.add_option("--sig_norm", type=float, default=100.0,
+                      help="Signal normalization (definition of mu=1)")
     parser.add_option("--ftest_thresh", type=float, default=0.05,
                       help="Threshold to prefer a function in the f-test")
     parser.add_option("--err_thresh", type=float, default=0.5,
                       help="Threshold on fit unc to be included in f-test")
-    parser.add_option("-s", "--sig_shape", default="signal_shape_m2500.root",
+    parser.add_option("-s", "--sig_shape", default="sig_shape_M15.root",
                       help="Pre-saved signal shape")
     parser.add_option("--refit_sig", default=False, action="store_true",
                       help="""Fit the signal events (using truth labels)
                       to get signal shape""")
     parser.add_option("--rebin", default=False, action="store_true",
                       help="""Rebin  to make sure no bins less than 5 evts""")
-    parser.add_option("-M", "-M", dest="mass", type=float, default=2500.,
-                      help="Injected signal mass")
+    parser.add_option("-M", "-M", dest="mass", type=float, default=15.,
+                      help="Signal mass hypothesis")
     parser.add_option("-i", "--inputFile", dest="inputFile",
                       default='fit_inputs/no_selection_03p.h5',
                       help="input h5 file")
@@ -640,9 +533,9 @@ def fitting_options():
                       help="Blinding the signal region for the fit.")
     parser.add_option("--dcb-model", dest="dcb_model", action="store_true",
                       default=False,
-                      help="""Whether to use double crystal ball model instead
+                      help="""Whether to use double crystal ball model for signal shape instead
                       of default model (gaussian core with single crystal ball)""")
-    parser.add_option("--sig_norm_unc", dest="sig_norm_unc", type=float, default= -1.0, help="Fractional uncertainty on signal normalization")
+    parser.add_option("--sig_norm_unc", dest="sig_norm_unc", type=float, default= -1.0, help="Fractional uncertainty on signal normalization (for limits)")
     return parser
 
 

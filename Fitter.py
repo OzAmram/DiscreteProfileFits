@@ -5,6 +5,8 @@ from array import array
 import os,sys
 ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.ERROR)
 
+
+
 class Fitter(object):
     def __init__(self,poi = ['x'], debug = False):
         self.cache_name = "cache%i.root"%(random.randint(0, 1e+6))
@@ -13,6 +15,8 @@ class Fitter(object):
         self.cache.cd()
         self.debug = debug
         self.cleanedup = False
+        self.objs = []
+        self.par_names = []
 
         self.w=ROOT.RooWorkspace("w","w")
         self.dimensions = len(poi)
@@ -25,10 +29,6 @@ class Fitter(object):
         if(not self.cleanedup): self.delete()
 
     def delete(self):
-        if self.w:
-            self.w.Delete()
-        self.cache.Close()
-        self.cache.Delete()
         os.system("rm %s" % self.cache_name)
         self.cleanedup = True
 
@@ -66,7 +66,12 @@ class Fitter(object):
             #for b in range(0,a.numBins()+1):
                 #print a.binLow(b)
         dataHist=ROOT.RooDataHist(name,name,cList,histogram)
-        getattr(self.w,'import')(dataHist,ROOT.RooFit.Rename(name))
+        getattr(self.w,'import')(dataHist)
+
+        self.objs.append(dataHist)
+
+        self.w.Print()
+        return dataHist
 
     def fetch(self,var):
         #import pdb; pdb.set_trace()
@@ -91,6 +96,8 @@ class Fitter(object):
         fit_data = self.w.data(data)
         print(fit_data)
         print(options, options[0])
+        self.w.Print()
+        self.w.pdf(model).Print()
 
         if len(options)==0:
             fitresults = self.w.pdf(model).fitTo(fit_data)
@@ -125,11 +132,13 @@ class Fitter(object):
 
     def projection(self,model = "model",data="data",poi="x",filename="fit.root",binning=0,logy=False,xtitle='x',mass=1000):
 
-        self.frame=self.w.var(poi).frame()
 
         f = ROOT.TFile.Open("fitresults.root",'READ')
 
         linear_errors = False
+        ndata = self.w.data(data).numEntries()
+        self.frame=self.w.var(poi).frame(ROOT.RooFit.Bins(ndata))
+        nbins = self.w.var(poi).getBinning().numBins()
 
         if f: 
             fr = f.Get('fitresults')
@@ -142,15 +151,21 @@ class Fitter(object):
             if fr: 
                 self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.VisualizeError(fr,1, linear_errors),ROOT.RooFit.FillColor(ROOT.kRed-7),ROOT.RooFit.LineColor(ROOT.kRed-7),ROOT.RooFit.Name(fr.GetName()))
                 self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.LineColor(ROOT.kRed+1))	 
+            self.w.data(data).plotOn(self.frame,ROOT.RooFit.Binning(binning))
         else: 
-            self.w.data(data).plotOn(self.frame,ROOT.RooFit.Invisible())
+            self.w.data(data).plotOn(self.frame,
+                                     ROOT.RooFit.DataError(ROOT.RooAbsData.Poisson),
+                                     ROOT.RooFit.Binning(nbins),
+                                     ROOT.RooFit.Invisible()
+                                    )
             if fr: 
                 self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.VisualizeError(fr,1, linear_errors),ROOT.RooFit.FillColor(ROOT.kRed-7),ROOT.RooFit.LineColor(ROOT.kRed-7),ROOT.RooFit.Name(fr.GetName()))
                 self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.LineColor(ROOT.kRed+1))
 
-        if binning: self.w.data(data).plotOn(self.frame,ROOT.RooFit.Binning(binning))
-        else: self.w.data(data).plotOn(self.frame)
-
+            self.w.data(data).plotOn(self.frame,
+                                     ROOT.RooFit.DataError(ROOT.RooAbsData.Poisson),
+                                     ROOT.RooFit.Binning(nbins)
+                                    )
         self.legend = self.getLegend()
         self.legend.AddEntry( self.w.pdf(model)," Full PDF","l")
 
@@ -168,8 +183,25 @@ class Fitter(object):
 
         self.legend.Draw("same")	    
         self.c.SaveAs(filename)
+
+        chi2 = ROOT.RooChi2Var("chi2", "chi2", self.w.pdf(model), self.w.data(data))
+        chi2_val = chi2.getVal()
+
         pullDist = self.frame.pullHist()
-        return self.frame.chiSquare()
+        auto_chi2 = self.frame.chiSquare()
+        auto_chi2_v2 = self.frame.chiSquare(
+                            self.w.pdf(model).getParameters(self.w.data(data)).getSize()-
+                            self.w.pdf(model).getParameters(self.w.data(data)).selectByAttrib("Constant", True).getSize()
+                            )
+
+        nfloat = self.w.pdf(model).getParameters(self.w.data(data)).selectByAttrib("Constant", False).getSize()
+
+        ndof = nbins - nfloat
+
+        print(auto_chi2, auto_chi2_v2, chi2_val, ndof, chi2_val/ndof)
+
+        return chi2_val, ndof
+
 
     def signalResonance(self,name = 'model',poi="MVV",mass=0):
 
@@ -177,12 +209,12 @@ class Fitter(object):
 
         self.w.factory("MH[1000]")
         self.w.factory("mean[%.1f,%.1f,%.1f]"%(mass,0.8*mass,1.2*mass))
-        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.05,mass*0.02,mass*0.10))
+        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.02,mass*0.005,mass*0.10))
         self.w.factory("alpha[0.85,0.60,1.20]")
         self.w.factory("sign[6,0.1,150]")
         self.w.factory("scalesigma[2.0,1.2,3.6]")
         gsigma = ROOT.RooFormulaVar("gsigma","@0*@1", ROOT.RooArgList(self.w.var("sigma"),self.w.var("scalesigma")))
-        getattr(self.w,'import')(gsigma,ROOT.RooFit.Rename('gsigma'))
+        getattr(self.w,'import')(gsigma)
         self.w.factory("Gaussian::gauss(%s,mean,gsigma)"%poi)
         self.w.factory("CBShape::cb(%s,mean,sigma,alpha,sign)"%poi)
         self.w.factory('SUM::'+name+'(sigfrac[0.0,0.0,0.850]*gauss,cb)')
@@ -193,7 +225,7 @@ class Fitter(object):
         
         self.w.factory("MH[1000]")
         self.w.factory("mean[%.1f,%.1f,%.1f]"%(mass,0.8*mass,1.2*mass))
-        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.05,mass*0.02,mass*0.10))
+        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.02,mass*0.005,mass*0.10))
         self.w.factory("alpha[1.2,0.0,18]")
         self.w.factory("alpha2[1.2,0.0,10]")
         self.w.factory("sign[5,0,600]")
@@ -201,43 +233,129 @@ class Fitter(object):
         self.w.factory("DoubleCB::"+name+"(%s,mean,sigma,alpha,sign,alpha2,sign2)"%poi)
 
 
-    def bernShape(self, name = 'model', poi = 'm', nPars=4):
+    def polyExpShape(self, name = 'model', poi = None, order=4, start_vals=None):
+        #Sum of exponentials
+
+        #initial values
+        p_init = 0.0
+        pmin = -10.0
+        pmax = 10.0
+
+        c_init = 0.2
+        cmin = 0.
+        cmax = 1.
+
+
+        exp_par = ROOT.RooRealVar(f"polyExp_e", f"polyExp_e", p_init, pmin, pmax)
+        exp = ROOT.RooExponential(f"polyExp_exp", f"polyExp_exp", poi, exp_par)
+
+        p_list = ROOT.RooArgList()
+        par_names = []
+        for i in range(order):
+            poly_par = ROOT.RooRealVar(f"polyExp_p{i}", f"polyExp_p{i}", p_init, pmin, pmax)
+            getattr(self.w, 'import')(poly_par)
+            p_list.add(poly_par)
+            par_names.append(f"polyExp_p{i}")
+
+        poly = ROOT.RooPolynomial("polyExp_poly", "polyExp_poly", poi, p_list)
+        self.objs.extend([poly, exp])
+
+        shape = ROOT.RooProdPdf(name+"_shape", name+"_shape", exp, poly)
+
+        self.par_names.extend(par_names)
+
+        return shape
+
+    def bernShape(self, name = 'model', poi = None, order=4, start_vals=None):
         #sum of bernstein polynomials
 
         #initial values
-        init = [0.2, 1.5, 2.0, 2.0, 2.0]
+        if(start_vals is None):
+            start_vals = [0.2, 1.5, 2.0, 2.0, 2.0]
         pmin = 0.0
-        pmax = 10.0
-        p_list = ROOT.RooArgList(poi)
-        for i range(nPars):
-            self.w.factory(f"p{i}[{init[i]}, {pmin}, {pmax}]")
-            p_list.append(self.w.var(f"p{i}"))
+        pmax = 20.0
 
-        model = ROOT.RooBernstein(name, p_list)
+        par_list = ROOT.RooArgList(poi)
+        par_names = []
+        for i in range(order):
+            self.w.factory(f"bern_p{i}[{start_vals[i]}, {pmin}, {pmax}]")
+            par_list.add(self.w.var(f"bern_p{i}"))
+            par_names.append(f"bern_p{i}")
 
-    def expShape(self, name = 'model', poi = 'm', nPars=4):
+        shape = ROOT.RooBernstein(name+"_shape", name+"_shape", poi, par_list)
+        self.par_names.extend(par_names)
+
+        return shape
+
+    def expShape(self, name = 'model', poi = None, order=4, start_vals=None):
         #Sum of exponentials
 
-        #TODO
+        #initial values
+        p_init = -0.5
+        pmin = -10.0
+        pmax = 10.0
 
-        return None
+        c_init = 0.2
+        cmin = 0.
+        cmax = 1.
+
+        e_list = ROOT.RooArgList()
+        c_list = ROOT.RooArgList()
+        par_names = []
+
+        for i in range(order):
+            exp_par = ROOT.RooRealVar(f"exp_p{i}", f"exp_p{i}", p_init, pmin, pmax)
+            exp = ROOT.RooExponential(f"exp_{i}", f"exp_{i}", poi, exp_par)
+            coef = ROOT.RooRealVar(f"exp_c{i}", f"exp_c{i}", c_init, cmin, cmax)
+
+            e_list.add(exp)
+            par_names.append(f"exp_p{i}")
+
+            if(i<(order-1)): # don't include last coeff because redundant
+                c_list.add(coef)
+                par_names.append(f"exp_c{i}")
+
+            self.objs.extend([exp_par, exp, coef])
+
+        recursiveFraction=True
+        shape = ROOT.RooAddPdf(name+"_shape", name+"_shape", e_list, c_list, recursiveFraction)
+
+        self.par_names.extend(par_names)
+
+        return shape
 
 
 
-    def bkgShape(self, shape='bern', name = 'model',poi="m",nPars=2):
+
+
+    def bkgShape(self, func_form='bern', name = 'model',poi="m",order=2):
 
         if(type(poi) == str): poi = self.w.var(poi)
 
 
-        if(shape == 'bern'):
-            model = self.bernShape(name=name, poi=poi, nPars=nPars)
-        elif(shape == 'exp'):
-            model = self.expShape(name=name, poi=poi, nPars=nPars)
+        if(func_form == 'bern'):
+            shape = self.bernShape(name=name, poi=poi, order=order)
+        elif(func_form == 'polyExp'):
+            shape = self.polyExpShape(name=name, poi=poi, order=order)
+        elif(func_form == 'exp'):
+            shape = self.expShape(name=name, poi=poi, order=order)
         else:
-            print("Shape %s not implemented!")
+            print("Shape %s not implemented!" % shape)
             exit(1)
 
-        getattr(self.w,'import')(model,ROOT.RooFit.Rename(name))
+
+        norm = 10000.
+        norm_name = name + "_norm"
+        norm_var = ROOT.RooRealVar(norm_name, norm_name, norm, 0., 1e8)
+
+        self.w.Print()
+        model = ROOT.RooExtendPdf(name, name, shape, norm_var)
+
+        print("bkg shape")
+        self.w.Print()
+        getattr(self.w,'import')(model)
+        self.objs.append((shape, norm_var, model))
+
         return model
 
 
@@ -300,19 +418,19 @@ class Fitter(object):
 
         alphaOneVar = "_".join(["ALPHAONE", name, ])        
         alpha_one = ROOT.RooRealVar(alphaOneVar,alphaOneVar,alpha_one)
-        getattr(self.w, 'import')(alpha_one, ROOT.RooFit.Rename(alphaOneVar))
+        getattr(self.w, 'import')(alpha_one)
 
         alphaTwoVar = "_".join(["ALPHATWO", name, ])        
         alpha_two = ROOT.RooRealVar(alphaTwoVar, alphaTwoVar, alpha_two)
-        getattr(self.w, 'import')(alpha_two, ROOT.RooFit.Rename(alphaTwoVar))
+        getattr(self.w, 'import')(alpha_two)
         
         signOneVar = "_".join(["SIGNONE", name, ])
         sign_one = ROOT.RooRealVar(signOneVar, signOneVar, sign_one)    
-        getattr(self.w, 'import')(sign_one, ROOT.RooFit.Rename(signOneVar))
+        getattr(self.w, 'import')(sign_one)
         
         signTwoVar = "_".join(["SIGNTWO", name, ])
         sign_two = ROOT.RooRealVar(signTwoVar, signTwoVar, sign_two)    
-        getattr(self.w, 'import')(sign_two, ROOT.RooFit.Rename(signTwoVar))
+        getattr(self.w, 'import')(sign_two)
         
         #dcbFunc = "_".join(["dcb", name, ])
         #import pdb; pdb.set_trace()
@@ -321,7 +439,9 @@ class Fitter(object):
                                       self.w.function(sigmaVar), alpha_one,
                                       sign_one, alpha_two, sign_two)
 
-        getattr(self.w, 'import')(dcb, ROOT.RooFit.Rename(pdfName))
+        getattr(self.w, 'import')(dcb)
+
+        self.objs.append(dcb)
 
         return dcb, [alpha_one, alpha_two, sign_one, sign_two]
 

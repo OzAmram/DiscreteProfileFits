@@ -5,12 +5,22 @@ import time, sys, os, optparse, json, copy
 import copy
 
 import ROOT
+import CMS_lumi, tdrstyle
 ROOT.gStyle.SetOptStat(0)
 ROOT.gStyle.SetOptTitle(0)
-import CMS_lumi, tdrstyle
 tdrstyle.setTDRStyle()
 ROOT.gROOT.SetBatch(True)
 ROOT.RooRandom.randomGenerator().SetSeed(random.randint(0, 1e+6))
+
+def get_nPars(order, func_form):
+    if(func_form == 'bern'):
+        return order
+    if(func_form == 'exp'):
+        return 2*order
+    if(func_form == 'polyExp'):
+        return order+1
+
+
 
 # function to extract string from function -> in order write a proper json file
 def returnString(func,ftype):
@@ -165,7 +175,8 @@ def get_pull_hist(model, frame, central, curve,  hresid, fit_hist, bins):
 
 
 
-def PlotFitResults(frame,fitErrs,nPars,pulls,data_name,pdf_names,chi2,ndof,canvname, plot_dir, has_sig = False, draw_sig = False, plot_label = "", ratio_unc = None):
+def PlotFitResults(frame,fitErrs,nPars,pulls,data_name,pdf_names,chi2,ndof,canvname, plot_dir, has_sig = False, 
+                        draw_sig = False, plot_label = "", ratio_unc = None, logy=False):
 
     c1 =ROOT.TCanvas("c1","",800,800)
     c1.SetLogy()
@@ -174,7 +185,6 @@ def PlotFitResults(frame,fitErrs,nPars,pulls,data_name,pdf_names,chi2,ndof,canvn
     c1.cd(1)
     p11_1 = c1.GetPad(1)
     p11_1.SetPad(0.01,0.26,0.99,0.98)
-    p11_1.SetLogy()
     p11_1.SetRightMargin(0.05)
 
 
@@ -187,9 +197,13 @@ def PlotFitResults(frame,fitErrs,nPars,pulls,data_name,pdf_names,chi2,ndof,canvn
     p11_1.SetFrameBorderMode(0)
     frame.GetYaxis().SetTitleSize(0.06)
     frame.GetYaxis().SetTitleOffset(0.98)
-    frame.SetMinimum(0.2)
-    frame.SetMaximum(1E7)
-    frame.SetName("mjjFit")
+
+    if(logy):
+        p11_1.SetLogy()
+        frame.SetMinimum(0.2)
+        frame.SetMaximum(1E7)
+
+    frame.SetName("mFit")
     frame.GetYaxis().SetTitle("Events / 100 GeV")
     frame.SetTitle("")
     frame.Draw()
@@ -275,7 +289,7 @@ def PlotFitResults(frame,fitErrs,nPars,pulls,data_name,pdf_names,chi2,ndof,canvn
     pulls.SetMinimum(-4.0)
     pulls.SetMaximum(4.0)
     pulls.SetTitle("")
-    pulls.SetXTitle("Dijet invariant mass (GeV)")
+    pulls.SetXTitle("M_{#mu#mu} (GeV)")
     pulls.GetXaxis().SetTitleSize(0.06)
     pulls.SetYTitle("#frac{Data-Fit}{Unc.}")
     pulls.GetYaxis().SetTitleSize(0.15)
@@ -433,109 +447,65 @@ def fill_hist(v, h, event_num = None):
     #h.Print("range")
 
 
-def get_mjj_max(h_file):
+def get_masses_max(h_file):
     with h5py.File(h_file, "r") as f:
-        mjj = np.array(f['mjj'][()])
-        return np.amax(mjj)
+        masses = np.array(f['masses'][()])
+        return np.amax(masses)
 
 
 def load_h5_sb(h_file, hist, correctStats=False, sb1_edge = -1., sb2_edge = -1.):
     event_num = None
     with h5py.File(h_file, "r") as f:
-        mjj = np.array(f['mjj'][()])
+        masses = np.array(f['masses'][()])
         if(correctStats):
             event_num = f['event_num'][()]
 
-    fill_hist(mjj, hist, event_num)
+    fill_hist(masses, hist, event_num)
 
 def load_h5_bkg(h_file, hist, correctStats = False):
     event_num = None
     with h5py.File(h_file, "r") as f:
-        mjj = f['mjj'][()]
+        masses = f['masses'][()]
         is_sig = f['truth_label'][()]
         if(correctStats):
             event_num = f['event_num'][()]
 
     mask = (is_sig < 0.1)
     if(correctStats): event_num = event_num[mask]
-    fill_hist(mjj[mask], hist, event_num)
-
-
-def load_h5_sig(h_file, hist, sig_mjj, requireWindow = False, correctStats =False, mixed = False):
-    event_num = None
-    with h5py.File(h_file, "r") as f:
-        try:
-            mjj = f['jet_kinematics'][:, 0]
-        except:
-            mjj = f['mjj'][()]
-
-        num_evts = mjj.shape[0]
-        if(mixed):
-            is_sig = f['truth_label'][()].flatten()
-        else: 
-            is_sig = np.ones_like(mjj)
-
-
-        if(is_sig.shape[0] != mjj.shape[0]):
-            #fix bug in old h5 maker where is_sig array would be too long
-            is_sig = is_sig[:num_evts]
-        
-        if(correctStats):
-            event_num = f['event_num'][()]
-
-
-    if(requireWindow): mask = (mjj > 0.8*sig_mjj) & (mjj < 1.2*sig_mjj) & (is_sig > 0.9)
-    else: mask = mjj > 0.
-    if(correctStats): event_num = event_num[mask]
-    fill_hist(mjj[mask], hist, event_num)
-
-
-
-def load_h5_top(h_file, hist, requireWindow = False, correctStats =False, mixed = False):
-    event_num = None
-    with h5py.File(h_file, "r") as f:
-        mass = f['mass'][()]
-        if('label' in list(f.keys())):
-            label = f['label'][()]
-            top_mask = label == -2 #CASE code for ttbar
-            mass = mass[top_mask]
-
-    fill_hist(mass, hist)
-
-
+    fill_hist(masses[mask], hist, event_num)
 
 
 def get_sig_in_window(h_file, m_low, m_high):
     with h5py.File(h_file, "r") as f:
         if('truth_label' in f.keys()):
-            mjj = f['mjj'][()]
+            masses = f['masses'][()]
             is_sig = f['truth_label'][()].reshape(-1)
         else:
             return 0
 
     eps = 1e-6
-    in_window = (mjj > m_low) & (mjj < m_high)
+    in_window = (masses > m_low) & (masses < m_high)
     sig_events = is_sig > 0.9
     bkg_events = is_sig < 0.1
-    S = mjj[sig_events & in_window].shape[0]
+    S = masses[sig_events & in_window].shape[0]
     return S
 
 
 def check_rough_sig(h_file, m_low, m_high):
     with h5py.File(h_file, "r") as f:
         if('truth_label' in f.keys()):
-            mjj = f['mjj'][()]
+            masses = f['masses'][()]
             is_sig = f['truth_label'][()].reshape(-1)
         else:
             return
 
     eps = 1e-6
-    in_window = (mjj > m_low) & (mjj < m_high)
+    in_window = (masses > m_low) & (masses < m_high)
     sig_events = is_sig > 0.9
     bkg_events = is_sig < 0.1
-    S = max(mjj[sig_events & in_window].shape[0], eps)
-    B = max(mjj[bkg_events & in_window].shape[0], eps)
-    print("Mjj window %f to %f " % (m_low, m_high))
+    S = max(masses[sig_events & in_window].shape[0], eps)
+    B = max(masses[bkg_events & in_window].shape[0], eps)
+    print("Mass window %f to %f " % (m_low, m_high))
     print("S = %i, B = %i, S/B %f, sigificance ~ %.1f " % (S, B, float(S)/B, S/np.sqrt(B)))
 
 def get_below_bins(h, min_count = 5):
@@ -575,7 +545,7 @@ def get_rebinning(binsx, histos_sb, min_count = 5):
 
 
     
-def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = True, plot_label = "" ):
+def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = True, plot_label = "", logy=False ):
 
     roobins = ROOT.RooBinning(len(bins)-1, array('d', bins), "SB_bins")
     
@@ -584,12 +554,9 @@ def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = Tr
 
     model_name = 'model_s'
     data_name = 'data_obs'
-    sig_name = 'shapeSig_model_signal_mjj_JJ_%s' % label
     model_tot = workspace.pdf(model_name)
-    model_qcd = workspace.pdf('model_b')
-    model_sig = workspace.pdf(sig_name)
     workspace.ls()
-    mjj = workspace.var('mjj')
+    m_mumu = workspace.var('m')
     data = workspace.data(data_name)
 
 
@@ -600,25 +567,26 @@ def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = Tr
 
     #default roofit normalization is total range divided by number of bins, we want per 100 GeV
 
-    #rescale so pdfs are in evts per 100 GeV
+    #rescale so pdfs are in evts per 0.5 GeV
     low = roobins.lowBound()
     high = roobins.highBound()
     n = roobins.numBoundaries() - 1
 
     default_norm = (high - low)/ n
 
-    rescale = 100./ default_norm
+    rescale = 0.5/ default_norm
 
     fit_norm = ROOT.RooFit.Normalization(rescale,ROOT.RooAbsReal.Relative)
 
 
     
     fres = model.fitTo(data,ROOT.RooFit.SumW2Error(1),ROOT.RooFit.Minos(0),ROOT.RooFit.Verbose(0),ROOT.RooFit.Save(1),ROOT.RooFit.NumCPU(8), ROOT.RooFit.Minimizer("Minuit2")) 
-    fres = model.fitTo(data,ROOT.RooFit.SumW2Error(1),ROOT.RooFit.Minos(0),ROOT.RooFit.Verbose(0),ROOT.RooFit.Save(1),ROOT.RooFit.NumCPU(8), ROOT.RooFit.Minimizer("Minuit2")) 
+    #fres = model.fitTo(data,ROOT.RooFit.SumW2Error(1),ROOT.RooFit.Minos(0),ROOT.RooFit.Verbose(0),ROOT.RooFit.Save(1),ROOT.RooFit.NumCPU(8), ROOT.RooFit.Minimizer("Minuit2")) 
     #fres.Print()
     
-    frame = mjj.frame()
-    pdf_name = 'JJ_%s'%label
+    m_mumu.Print()
+    frame = m_mumu.frame()
+    pdf_name = 'mumu_%s'%label
     
     #use toys to sample errors rather than linear method, 
     #needed b/c dijet fn's usually has strong correlation of params
@@ -634,13 +602,13 @@ def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = Tr
         model.getPdf(pdf_name).Print("V")
 
         #unc's on individual components
-        #model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeSig_model_signal_mjj_JJ_raw"), ROOT.RooFit.VisualizeError(fres, 1, linear_errors), 
+        #model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeSig_model_signal_m_mumu_raw"), ROOT.RooFit.VisualizeError(fres, 1, linear_errors), 
                 #ROOT.RooFit.FillColor(ROOT.kCyan), ROOT.RooFit.LineColor(ROOT.kCyan), fit_norm)
-        #model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeBkg_model_qcd_mjj_JJ_raw"), ROOT.RooFit.VisualizeError(fres, 1, linear_errors), 
+        #model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeBkg_model_qcd_m_mumu_raw"), ROOT.RooFit.VisualizeError(fres, 1, linear_errors), 
                 #ROOT.RooFit.LineColor(ROOT.kMagenta + 3), ROOT.RooFit.FillColor(ROOT.kMagenta), fit_norm)
 
-        model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeSig_model_signal_mjj_JJ_raw"), ROOT.RooFit.LineColor(ROOT.kBlue),ROOT.RooFit.Name("Signal"), fit_norm)
-        model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeBkg_model_qcd_mjj_JJ_raw"), ROOT.RooFit.LineColor(ROOT.kMagenta + 3),ROOT.RooFit.Name("Background"), fit_norm)
+        model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeSig_model_signal_m_mumu_raw"), ROOT.RooFit.LineColor(ROOT.kBlue),ROOT.RooFit.Name("Signal"), fit_norm)
+        model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.Components("shapeBkg_model_qcd_m_mumu_raw"), ROOT.RooFit.LineColor(ROOT.kMagenta + 3),ROOT.RooFit.Name("Background"), fit_norm)
 
     model.getPdf(pdf_name).plotOn(frame,ROOT.RooFit.LineColor(ROOT.kRed+1),ROOT.RooFit.Name("model_s"), fit_norm)
 
@@ -664,7 +632,7 @@ def checkSBFit(filename,label,bins,plotname, nPars, plot_dir = "", draw_sig = Tr
         else: loBound.SetPoint( 2*central.GetN() - j, curve.GetX()[j], curve.GetY()[j]);
 
 
-    fit_hist = model.createHistogram("h_model_fit", mjj, ROOT.RooFit.Binning(roobins))
+    fit_hist = model.createHistogram("h_model_fit", m_mumu, ROOT.RooFit.Binning(roobins))
     fit_hist.Scale(norm / fit_hist.Integral())
 
     #Get hist of pulls:  (data - fit) / tot_unc
