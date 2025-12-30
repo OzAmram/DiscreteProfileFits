@@ -130,8 +130,7 @@ def dofit(options):
 
     for i, order in enumerate(orderToTry):
         print("Trying %i parameter background fit" % order)
-        bkg_fnames[i] = str(order) + 'par_bkg_fit%i.root' % i
-        bkg_outfile = ROOT.TFile(bkg_fnames[i], 'RECREATE')
+        bkg_fnames[i] = func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
 
         nPars = get_nPars(order, func_form)
 
@@ -144,16 +143,10 @@ def dofit(options):
         #Running fit two times seems to improve things sometimes (better initial guesses for params?)
         #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
-        chi2_fine = fitter_bkg.projection(
+        chi2_fine, ndof_fine = fitter_bkg.projection(
             model=model_name, data=data_name, poi="m_fine",
-            filename=plot_dir + str(order) + "par_bkg_fit.png", binning=0, logy=False)
+            filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False)
 
-        #chi2_binned = fitter_bkg.projection(
-        #     model_name, data_name, "m_fine",
-        #     plot_dir + str(order) + "par_bkg_fit_binnedx.png",roobins,True)
-
-
-        bkg_outfile.cd()
 
         m = fitter_bkg.getVar('m_fine')
         m.setBins(nbins_fine)
@@ -242,31 +235,23 @@ def dofit(options):
 
 
         #TODO
-        graphs = {}
-        for parName in fitter_bkg.par_names:
-            graphs[pa] = ROOT.TGraphErrors()
-
-        #largest_frac_err = 0.
         bkg_fit_params = dict()
-        for var, graph in graphs.items():
-            print(var)
-            value, error = fitter_bkg.fetch(var)
-            bkg_fit_params[var] = (value, error)
-            graph.SetPoint(0, mass, value)
-            graph.SetPointError(0, 0.0, error)
-            #frac_err = abs(error/value)
-            #largest_frac_err = max(frac_err, largest_frac_err)
+        for parName in fitter_bkg.par_names:
+            value, error = fitter_bkg.fetch(parName)
+            bkg_fit_params[parName] = (value, error)
+
+        bkg_fit_params['par_names'] = fitter_bkg.par_names
+
+
+        with open(bkg_fnames[i], "w") as jsonfile:
+            json.dump(bkg_fit_params, jsonfile, indent=4)
+
         bkg_fit_params['cov'] = convert_matrix(fres.covarianceMatrix())
         print(bkg_fit_params['cov'])
 
-        bkg_outfile.cd()
-        for name, graph in graphs.items():
-            graph.Write(name)
-        bkg_outfile.Close()
-
         print("#############################")
-        print("% Order %i results: " % order)
-        print("bkg fit chi2/nbins (fine binning) ", chi2_fine)
+        print("Order %i results: " % order)
+        print("bkg fit chi2/nbins (fine binning) ", chi2_fine, ndof_fine, chi2_fine/ndof_fine)
         print("My chi2, ndof, prob", my_chi2, my_ndof, my_prob)
         print("My chi/ndof, chi2/nbins", my_chi2/my_ndof, my_chi2/(my_ndof + nPars))
         print("Fit func fractional unc at sig mass ", bkg_fit_frac_err)

@@ -342,7 +342,7 @@ class DataCardMaker:
         getattr(self.w,'import')(model)
         return model
 
-    def addBkgShapeNoTag(self,name,variable,preconstrains, func_form = "bern",   order=4):
+    def addBkgShapeNoTag(self,name,variable, fname, func_form = "bern",   order=4):
 
         pdfName=name+"_"+self.tag
     
@@ -355,12 +355,11 @@ class DataCardMaker:
     
         print("npars", nPars)
 
-        print("fname ", preconstrains)
-        f = ROOT.TFile.Open(preconstrains,'READ')
-        f.ls()
-        parsG = [f.Get('p%i'%i) for i in range(nPars)]
-        print(parsG)
-        pars_val = [ctypes.c_double(0.) for i in range(nPars)] 
+        print("fname ", fname)
+
+        with open(fname, 'r') as f:
+            params = json.load(f)
+
         for i in range(nPars):
             x = ctypes.c_double(0.)
             parsG[i].GetPoint(0,x,pars_val[i])
