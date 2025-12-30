@@ -3,7 +3,7 @@ import pickle
 import json
 import random
 import optparse
-from Fitter import Fitter
+from Fitter import Fitter, shape_map
 from DataCardMaker import DataCardMaker
 from Utils import *
 from array import array
@@ -101,25 +101,33 @@ def dofit(options):
             exit(1)
         sig_file_name = options.sig_shape
 
+    sb_fname = "sb_fit.root"
+    sb_outfile = ROOT.TFile(sb_fname, 'RECREATE')
+    sb_outfile.cd()
+    histos_sb.Write("m_sb")
+    sb_outfile.Close()
+    sig_data_name = 'm_sb'
+    fit_label = "mumu"
+    poi_name = "m"
+
+    print(" CREATE WORKSPACE ") 
+    card = DataCardMaker(fit_label)
+
+    card.importBinnedData("sb_fit.root", sig_data_name,
+                          poi_name, 'data_obs', 1.0)
+
+    if options.dcb_model:
+        card.addDCBSignalShape('model_signal_m', sig_file_name,
+                               {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
+    else:
+        card.addSignalShape('model_signal_m',  sig_file_name,
+                            {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
 
 
-    print("\n\n ############# FIT BACKGROUND AND SAVE PARAMETERS ###########")
-    #orderToTry = [2, 3, 4, 5]
-
-    #orderToTry = [2, 3, 4]
-    orderToTry = [3,4]
-    chi2s = [0]*len(orderToTry)
-    fit_params = [0] * len(orderToTry)
-    ndofs = [0]*len(orderToTry)
-    probs = [0]*len(orderToTry)
-    fit_errs = [0]*len(orderToTry)
-    bkg_fnames = [""]*len(orderToTry)
-
-    #polyExp, bern, exp, 
-    #func_form = "polyExp"
-    func_form = "exp"
-    #func_form = "bern"
-
+    sig_norm = card.addFixedYieldFromFile('model_signal_m', 0, sig_file_name,
+                                          "m_sig", norm = options.sig_norm)
+    card.addSystematic("CMS_scale_j", "param", [0.0, options.scale_j_unc])
+    card.addSystematic("CMS_res_j", "param", [0.0, options.res_j_unc])
 
     if options.blinded:
         print("BLIND FIT TO DO ")
@@ -128,231 +136,121 @@ def dofit(options):
     fitting_histogram = histos_sb
     data_name = "data_bkg"
 
-    for i, order in enumerate(orderToTry):
-        print("Trying %i parameter background fit" % order)
-        bkg_fnames[i] = func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
+    func_forms = ["exp", "bern"]
+    #orderToTry = [2, 3, 4]
+    orderToTry = [3,4]
 
-        nPars = get_nPars(order, func_form)
+    for func_form in func_forms:
+        print("\n \n Fitting with functional form %s " % func_form)
 
-        model_name = "model_b" + str(i)
-        fitter_bkg = Fitter(['m_fine'], debug = False)
-        fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
-        fitter_bkg.importBinnedData(fitting_histogram, ['m_fine'], data_name)
-        
-        fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
-        #Running fit two times seems to improve things sometimes (better initial guesses for params?)
-        #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
+        chi2s = [0]*len(orderToTry)
+        fit_params = [0] * len(orderToTry)
+        ndofs = [0]*len(orderToTry)
+        probs = [0]*len(orderToTry)
+        fit_errs = [0]*len(orderToTry)
+        bkg_fnames = [""]*len(orderToTry)
 
-        chi2_fine, ndof_fine = fitter_bkg.projection(
-            model=model_name, data=data_name, poi="m_fine",
-            filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False)
+        for i, order in enumerate(orderToTry):
+            print("Trying %i parameter background fit" % order)
+            bkg_fnames[i] = func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
 
+            nPars = get_nPars(order, func_form)
 
-        m = fitter_bkg.getVar('m_fine')
-        m.setBins(nbins_fine)
-        model = fitter_bkg.getFunc(model_name)
-        dataset = fitter_bkg.getData(data_name)
+            model_name = "model_b" + str(i)
+            fitter_bkg = Fitter(['m_fine'], debug = False)
+            fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
+            fitter_bkg.importBinnedData(fitting_histogram, ['m_fine'], data_name)
+            
+            fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
+            #Running fit two times seems to improve things sometimes (better initial guesses for params?)
+            #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
-        #rescale so pdfs are in evts per 0.5 GeV
-        fit_range_low = roobins.lowBound()
-        fit_range_high = roobins.highBound()
-        n = roobins.numBoundaries() - 1
-        #RootFit default normalization is full range divided by number of bins
-        default_norm = (fit_range_high - fit_range_low)/ n
-        rescale = 0.5/ default_norm
-        fit_norm = ROOT.RooFit.Normalization(rescale,ROOT.RooAbsReal.Relative)
+            chi2_fine, ndof_fine = fitter_bkg.projection(
+                model=model_name, data=data_name, poi="m_fine",
+                filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False)
 
-        #use toys to sample errors rather than linear method, 
-        #needed b/c fn's usually have strong correlation of params
-        linear_errors = False
+            chi2_prob = ROOT.TMath.Prob(chi2_fine, ndof_fine)
 
 
-        frame = m.frame()
-        dataset.plotOn(frame, ROOT.RooFit.Name(data_name), ROOT.RooFit.Invisible(), ROOT.RooFit.Binning(roobins), ROOT.RooFit.DataError(ROOT.RooAbsData.SumW2), 
-                ROOT.RooFit.Rescale(rescale))
+            bkg_fit_params = dict()
+            for parName in fitter_bkg.par_names:
+                value, error = fitter_bkg.fetch(parName)
+                bkg_fit_params[parName] = (value, error)
 
-        model.plotOn(frame, ROOT.RooFit.VisualizeError(fres, 1, linear_errors), ROOT.RooFit.FillColor(ROOT.kRed - 7), ROOT.RooFit.LineColor(ROOT.kRed - 7), ROOT.RooFit.Name(fres.GetName()), 
-                       fit_norm)
-
-        model.plotOn(frame, ROOT.RooFit.LineColor(ROOT.kRed + 1), ROOT.RooFit.Name(model_name),  fit_norm)
-        
-
-        useBinAverage = True
-        hpull = frame.pullHist(data_name, model_name, useBinAverage)
-        hresid = frame.residHist(data_name, model_name, False, useBinAverage)
-        dhist = ROOT.RooHist(frame.findObject(data_name, ROOT.RooHist.Class()))
+            bkg_fit_params['par_names'] = fitter_bkg.par_names
+            bkg_fit_params['cov'] = convert_matrix(fres.covarianceMatrix())
 
 
+            with open(bkg_fnames[i], "w") as jsonfile:
+                json.dump(bkg_fit_params, jsonfile, indent=4)
 
-        #redraw data (so on top of model curves)
-        if(options.rebin):
-            dataset.plotOn(frame, ROOT.RooFit.Name(data_name),   ROOT.RooFit.Binning(roobins), ROOT.RooFit.DataError(ROOT.RooAbsData.SumW2),
-                       ROOT.RooFit.Rescale(rescale))
-        else:
-            dataset.plotOn(frame, ROOT.RooFit.Name(data_name),  ROOT.RooFit.XErrorSize(0), ROOT.RooFit.Binning(roobins), ROOT.RooFit.DataError(ROOT.RooAbsData.SumW2),
-                       ROOT.RooFit.Rescale(rescale))
+            print("#############################")
+            print("Order %i results: " % order)
+            print("bkg fit chi2/nbins (fine binning) ", chi2_fine, ndof_fine, chi2_fine/ndof_fine, chi2_prob)
+            print("#############################")
 
-        useBinAverage = True
-        hpull = frame.pullHist(data_name, model_name, useBinAverage)
-        hresid = frame.residHist(data_name, model_name, False, useBinAverage)
-        dhist = ROOT.RooHist(frame.findObject(data_name, ROOT.RooHist.Class()))
+            chi2s[i] = chi2_fine
+            ndofs[i] = ndof_fine
+            probs[i] = chi2_prob
+            fit_params[i] = bkg_fit_params
+            fit_errs[i] = 0. # Deprecated
+            fitter_bkg.delete()
 
+        #F-test on this functional for to determine best num of parameters
+        best_i = f_test(orderToTry, ndofs, chi2s, fit_errs, thresh = options.ftest_thresh, err_thresh = options.err_thresh)
+        best_order = orderToTry[best_i]
+        print("\n Chose order %i based on F-test ! \n" % best_order)
 
+        #Add this functional form to workspace of the final fit
+        shape_builder = shape_map[func_form]
+        bkg_model,_,bkg_pars = shape_builder(func_form, card.poi, order=best_order)
 
-        #get fractional error on fit
-        central = frame.getCurve(model_name);
-        curve =  frame.getCurve("fitresults");
-        upBound = ROOT.TGraph(central.GetN());
-        loBound = ROOT.TGraph(central.GetN());
-        norm = get_roohist_sum(dhist)
-
-        for j in range(curve.GetN()):
-            if( j < central.GetN() ): upBound.SetPoint(j, curve.GetX()[j], curve.GetY()[j]);
-            else: loBound.SetPoint( 2*central.GetN() - j, curve.GetX()[j], curve.GetY()[j]);
-
-
-        fit_hist = model.createHistogram("h_model_fit", m, ROOT.RooFit.Binning(roobins))
-        print("Hist fit norm", fit_hist.Integral())
-        fit_hist.Scale(norm / fit_hist.Integral())
-
-        #Get hist of pulls:  (data - fit) / tot_unc
-        hresid_norm = get_pull_hist(model, frame, central, curve, hresid, fit_hist,  bins)
+        card.bkg_shapes.append(bkg_model)
+        card.bkg_pars.extend(bkg_pars)
+        func_name = func_form + "_order" + str(best_order)
+        card.bkg_shape_names.append(func_name)
 
 
-        #abs because somtimes order is reversed
-        err_on_sig = abs(upBound.Eval(options.mass) - loBound.Eval(options.mass))/2.
-        frac_err_on_sig = err_on_sig / central.Eval(options.mass)
-        bkg_fit_frac_err = frac_err_on_sig
-
-
-        my_chi2, my_ndof = calculateChi2(hpull, nPars, excludeZeros = True, dataHist = dhist)
-        my_prob = ROOT.TMath.Prob(my_chi2, my_ndof)
-
-        PlotFitResults(frame, fres.GetName(), nPars, hresid_norm, data_name,
-                       [model_name], my_chi2, my_ndof,
-                       f"{func_form}_order{order}_bkg_fit_binned",
-                       plot_dir, plot_label = label)
-
-
-        #TODO
-        bkg_fit_params = dict()
-        for parName in fitter_bkg.par_names:
-            value, error = fitter_bkg.fetch(parName)
-            bkg_fit_params[parName] = (value, error)
-
-        bkg_fit_params['par_names'] = fitter_bkg.par_names
-
-
-        with open(bkg_fnames[i], "w") as jsonfile:
-            json.dump(bkg_fit_params, jsonfile, indent=4)
-
-        bkg_fit_params['cov'] = convert_matrix(fres.covarianceMatrix())
-        print(bkg_fit_params['cov'])
-
-        print("#############################")
-        print("Order %i results: " % order)
-        print("bkg fit chi2/nbins (fine binning) ", chi2_fine, ndof_fine, chi2_fine/ndof_fine)
-        print("My chi2, ndof, prob", my_chi2, my_ndof, my_prob)
-        print("My chi/ndof, chi2/nbins", my_chi2/my_ndof, my_chi2/(my_ndof + nPars))
-        print("Fit func fractional unc at sig mass ", bkg_fit_frac_err)
-        print("#############################")
-
-        chi2s[i] = my_chi2
-        ndofs[i] = my_ndof
-        probs[i] = my_prob
-        fit_params[i] = bkg_fit_params
-        fit_errs[i] = bkg_fit_frac_err
-        fitter_bkg.delete()
-
-    exit(1)
-
-    best_i = f_test(nParsToTry, ndofs, chi2s, fit_errs, thresh = options.ftest_thresh, err_thresh = options.err_thresh)
-    nPars_bkg = nParsToTry[best_i]
-    bkg_fname = bkg_fnames[best_i]
-    print("\n Chose %i parameters based on F-test ! \n" % nPars_bkg)
-
-    # Fit to total data
-    #histos_sb.Print("range")
-    #histos_bkg.Print("range")
-    #histos_sig.Print("range")
-
-    sb_fname = "sb_fit.root"
-    sb_outfile = ROOT.TFile(sb_fname, 'RECREATE')
-    sb_outfile.cd()
-    histos_sb.Write("m_sb")
-    sb_outfile.Close()
-    sig_data_name = 'm_sb'
-    sb_label = "raw"
-
-    card = DataCardMaker(sb_label)
-    if options.dcb_model:
-        card.addDCBSignalShape('model_signal_m', 'm', sig_file_name,
-                               {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
-    else:
-        card.addSignalShape('model_signal_m', 'm', sig_file_name,
-                            {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
-
-
-
-    sig_norm = card.addFixedYieldFromFile('model_signal_m', 0, sig_file_name,
-                                          "m_sig", norm = options.sig_norm)
-    #sig_norm = card.addFloatingYield('model_signal_m', 0, sig_file_name,
-    #                                 "m_sig", constant=False)
-    card.addSystematic("CMS_scale_j", "param", [0.0, options.scale_j_unc])
-    card.addSystematic("CMS_res_j", "param", [0.0, options.res_j_unc])
-
-    exit(1)
-    card.addBkgShapeNoTag('model_bkg_m', 'm', bkg_fname, order=order_bkg)
-    card.addFloatingYield('model_bkg_m', 1, sb_fname, "m_sb")
-
-    for i in range(0, nPars_bkg):
-        card.addSystematic("CMS_mumu_p%i" % i, "flatParam", [])
-
-    card.addSystematic("model_bkg_m_mumu_norm", "flatParam", [])
-    card.importBinnedData("sb_fit.root", sig_data_name,
-                          ["m"], 'data_obs', 1.0)
+    print("#### Building multi pdf ### ")
+    card.buildBkgShape()
 
     if(options.sig_norm_unc > 0):
         card.addSystematic("SigEff", "lnN", values = {"model_signal_m" : 1. + options.sig_norm_unc})
+
+    print("making card")
     card.makeCard()
-    card.delete()
+    #card.delete()
 
 
 
     cmd = (
-        "text2workspace.py datacard_mumu_{l2}.txt "
-        + "-o workspace_mumu_{l1}_{l2}.root "
-        + "&& combine -M FitDiagnostics workspace_mumu_{l1}_{l2}.root --cminPreFit 1 "
-        + "-m {mass} -n _{l1}_{l2} --robustFit 1"
-        + "&& combine -M Significance workspace_mumu_{l1}_{l2}.root --usePLC "
-        + "-m {mass} -n significance_{l1}_{l2} "
-        + "&& combine -M Significance workspace_mumu_{l1}_{l2}.root --usePLC "
-        + "-m {mass} --pvalue -n pvalue_{l1}_{l2} "
-        + "&& combine -M AsymptoticLimits workspace_mumu_{l1}_{l2}.root "
-        + "-m {mass} -n lim_{l1}_{l2} "
-        ).format(mass=mass, l1=label, l2=sb_label)
+        "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root "
+        + "&& combine -M FitDiagnostics workspace_{l1}_{l2}.root --cminPreFit 1 -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveShapes"
+        + "&& combine -M Significance workspace_{l1}_{l2}.root --usePLC -m {mass} -n significance_{l1}_{l2} "
+        + "&& combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} "
+        ).format(mass=mass, l1=label, l2=fit_label)
     print(cmd)
     os.system(cmd)
-    workspace_name = 'workspace_mumu_{l1}_{l2}.root'.format(l1=label, l2=sb_label)
-    sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, sb_label, bins, label + "_" + sb_label, nPars_bkg, 
-            plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
+    workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
 
-    sbfit_prob = ROOT.TMath.Prob(sbfit_chi2, sbfit_ndof)
+    #sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, fit_label, bins, label + "_" + fit_label, nPars_bkg, 
+            #plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
+    #sbfit_prob = ROOT.TMath.Prob(sbfit_chi2, sbfit_ndof)
 
     f_signif_name = ('higgsCombinesignificance_{l1}_{l2}.'
                      + 'Significance.mH{mass:.0f}.root'
-                     ).format(mass=mass, l1=label, l2=sb_label)
+                     ).format(mass=mass, l1=label, l2=fit_label)
     f_exp_signif_name = ('higgsCombine_exp_significance_{l1}_{l2}.'
                      + 'Significance.mH{mass:.0f}.root'
-                     ).format(mass=mass, l1=label, l2=sb_label)
+                     ).format(mass=mass, l1=label, l2=fit_label)
     f_limit_name = ('higgsCombinelim_{l1}_{l2}.'
                     + 'AsymptoticLimits.mH{mass:.0f}.root'
-                    ).format(mass=mass, l1=label, l2=sb_label)
+                    ).format(mass=mass, l1=label, l2=fit_label)
     f_pval_name = ('higgsCombinepvalue_{l1}_{l2}.'
                    + 'Significance.mH{mass:.0f}.root'
-                   ).format(mass=mass, l1=label, l2=sb_label)
+                   ).format(mass=mass, l1=label, l2=fit_label)
     f_diagnostics_name = ('fitDiagnostics_{l1}_{l2}.root'
-                   ).format(l1=label, l2=sb_label)
+                   ).format(l1=label, l2=fit_label)
 
     f_signif = ROOT.TFile(f_signif_name, "READ")
     res1 = f_signif.Get("limit")
@@ -376,7 +274,7 @@ def dofit(options):
     print("True sig strength %.3f" % true_sig_strength)
 
     cmd = ("combine -M Significance workspace_mumu_{l1}_{l2}.root -t -1 --expectSignal %.3f --toysFreq " % (true_sig_strength)
-        + "-m {mass} -n _exp_significance_{l1}_{l2} ").format(mass = mass, l1 = label, l2 = sb_label)
+        + "-m {mass} -n _exp_significance_{l1}_{l2} ").format(mass = mass, l1 = label, l2 = fit_label)
     print(cmd)
     os.system(cmd)
 

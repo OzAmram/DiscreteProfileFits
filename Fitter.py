@@ -95,6 +95,13 @@ def expShape(name, poi = None, order=4, start_vals=None):
     return shape, par_names, objs
 
 
+shape_map = {
+        "polyExp" : polyExpShape,
+        "bern": bernShape,
+        "exp": expShape
+
+        }
+
 
 
 class Fitter(object):
@@ -282,8 +289,6 @@ class Fitter(object):
 
         ndof = nbins - nfloat
 
-        print(auto_chi2, auto_chi2_v2, chi2_val, ndof, chi2_val/ndof)
-
         return chi2_val, ndof
 
 
@@ -341,11 +346,9 @@ class Fitter(object):
         norm_name = name + "_norm"
         norm_var = ROOT.RooRealVar(norm_name, norm_name, norm, 0., 1e8)
 
-        self.w.Print()
         model = ROOT.RooExtendPdf(name, name, shape, norm_var)
 
         print("bkg shape")
-        self.w.Print()
         getattr(self.w,'import')(model)
         self.objs.append((shape, norm_var, model))
 

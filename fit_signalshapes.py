@@ -46,13 +46,13 @@ def fit_signalmodel(input_file, sig_file_name, mass, x_bins, fine_bins,
     m_fine = fitter.getVar('m_fine')
     m_fine.setBins(len(bins_sig_fit))
 
-    chi2_fine = fitter.projection("model_s", "data", "m_fine",
+    chi2_fine, ndof = fitter.projection("model_s", "data", "m_fine",
                                   plot_dir + plot_label + "signal_fit.png")
 
     fitter.projection("model_s", "data", "m_fine",
                       plot_dir + plot_label +  "signal_fit_log.png", 0, True)
 
-    chi2 = fitter.projection("model_s", "data", "m_fine",
+    chi2, ndof = fitter.projection("model_s", "data", "m_fine",
                              plot_dir + plot_label + "signal_fit_binned.png",
                              roobins_sig_fit)
 

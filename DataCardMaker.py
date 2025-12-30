@@ -10,13 +10,16 @@ ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.WARNING)
 class DataCardMaker:
     def __init__(self,tag):
         self.systematics=[]
-        self.tag="mumu"+"_"+tag
+        self.tag="mass"+"_"+tag
         self.rootFile = ROOT.TFile("datacardInputs_%s.root"%self.tag,"RECREATE")
         self.rootFile.cd()
         self.w=ROOT.RooWorkspace("w","w")
         self.luminosity = 1.0
         self.contributions=[]
         self.systematics=[]
+        self.bkg_shapes = []
+        self.bkg_pars = []
+        self.bkg_shape_names = []
 
     def delete(self):
         #if self.w: 
@@ -112,35 +115,31 @@ class DataCardMaker:
 
 
         self.rootFile.cd()
-        self.w.Write("w",0,20000)
+        self.w.Write()
         self.rootFile.Close()
     
-    def importBinnedData(self,filename,histoname,poi,name = "data_obs",scale=1):
+    def importBinnedData(self,filename,histoname,poi_name,name = "data_obs",scale=1):
         f=ROOT.TFile(filename)
         histogram=f.Get(histoname)
         histogram.Scale(scale)
+
+        self.nData = histogram.Integral();
         cList = ROOT.RooArgList()
-        for i,p in enumerate(poi):
-            cList.add(self.w.var(p))
-            if i==0:
-                axis=histogram.GetXaxis()
-            elif i==1:
-                axis=histogram.GetYaxis()
-            elif i==2:
-                axis=histogram.GetZaxis()
-            else:
-                print('Asking for more than 3 D . ROOT doesnt support that, use unbinned data instead')
-                return
-            mini=axis.GetXmin()
-            maxi=axis.GetXmax()
-            bins=axis.GetNbins()
-            self.w.var(p).setMin(mini)
-            self.w.var(p).setMax(maxi)
-            self.w.var(p).setBins(bins)
-            self.w.var(p).setBins(bins,"cache")
-            mjj=self.w.var(p)
-        dataHist = ROOT.RooDataHist(name, name, cList, histogram)
-        #dataHist=ROOT.RooDataHist(name, name, ROOT.RooArgList(mjj), ROOT.RooFit.Import(histogram)) 
+
+        axis=histogram.GetXaxis()
+        mini=axis.GetXmin()
+        maxi=axis.GetXmax()
+        bins=axis.GetNbins()
+
+        self.w.factory(poi_name + "[%.0f,%.0f]" % (mini, maxi))  
+        self.poi = self.w.var(poi_name)
+
+        self.poi.setMin(mini)
+        self.poi.setMax(maxi)
+        self.poi.setBins(bins)
+        self.poi.setBins(bins,"cache")
+        dataHist = ROOT.RooDataHist(name, name, self.poi, histogram)
+
         getattr(self.w,'import')(dataHist)
     
     def addSystematic(self,name,kind,values,bin="",process="",variables="",addPar = ""):
@@ -170,8 +169,7 @@ class DataCardMaker:
         self.contributions.append({'name':name,'pdf':pdfName,'ID':ID,'yield':events})
         return events
 
-    def addDCBSignalShape(self, name, variable, jsonFile, scale={},
-                          resolution={}):
+    def addDCBSignalShape(self, name, jsonFile, scale={}, resolution={}):
 
         pdfName="_".join([name,self.tag])
         
@@ -189,8 +187,6 @@ class DataCardMaker:
             resolutionStr=resolutionStr+"+{factor}*{syst}".format(factor=factor,syst=syst)
             resolutionSysts.append(syst)
             
-        self.w.factory(variable+"[0,13000]")
-    
         f = ROOT.TFile(jsonFile,'READ')
         meanG = f.Get('mean')
         sigmaG = f.Get('sigma')
@@ -245,7 +241,7 @@ class DataCardMaker:
         
         #dcbFunc = "_".join(["dcb", name, self.tag])
         #import pdb; pdb.set_trace()
-        dcb = ROOT.RooDoubleCB(pdfName, pdfName, self.w.var(variable),
+        dcb = ROOT.RooDoubleCB(pdfName, pdfName, self.poi,
                                       self.w.function(meanVar),
                                       self.w.function(sigmaVar), alpha_one,
                                       sign_one, alpha_two, sign_two)
@@ -254,7 +250,7 @@ class DataCardMaker:
         return dcb
 
 
-    def addSignalShape(self,name,variable,jsonFile,scale ={},resolution={}):
+    def addSignalShape(self,name,jsonFile,scale ={},resolution={}):
     
         pdfName="_".join([name,self.tag])
     
@@ -275,7 +271,6 @@ class DataCardMaker:
             resolutionStr=resolutionStr+"+{factor}*{syst}".format(factor=factor,syst=syst)
             resolutionSysts.append(syst)
        
-        self.w.factory(variable+"[0,13000]")
     
         f = ROOT.TFile(jsonFile,'READ')
         meanG = f.Get('mean')
@@ -335,18 +330,41 @@ class DataCardMaker:
         #getattr(self.w,'import')(gsigma)
 
         gaussFunc = "_".join(["gauss",name,self.tag])   
-        gauss = ROOT.RooGaussian(gaussFunc, gaussFunc, self.w.var(variable), self.w.function(meanVar), gsigma)
+        gauss = ROOT.RooGaussian(gaussFunc, gaussFunc, self.poi, self.w.function(meanVar), gsigma)
         cbFunc = "_".join(["cb",name,self.tag])
-        cb    = ROOT.RooCBShape(cbFunc, cbFunc,self.w.var(variable), self.w.function(meanVar), self.w.function(sigmaVar), alpha, sign)
+        cb    = ROOT.RooCBShape(cbFunc, cbFunc,  self.poi, self.w.function(meanVar), self.w.function(sigmaVar), alpha, sign)
         model = ROOT.RooAddPdf(pdfName, pdfName, gauss, cb, self.w.var(sigfracVar)) 
         getattr(self.w,'import')(model)
         return model
+
+    def buildBkgShape(self):
+        #Make a RooCategory object. This will control which of the pdfs is "active"
+        cat = ROOT.RooCategory("pdf_index","Index of Pdf which is active")
+
+
+        rList = ROOT.RooArgList()
+        for shape in self.bkg_shapes:
+            rList.add(shape)
+            #getattr(self.w,'import')(shape)
+
+        multi_pdf = ROOT.RooMultiPdf("multi_pdf", "All pdfs", cat, rList)
+        #automatically adds the -0.5 penalty to likelihood per degree of freedom
+
+        norm_var = ROOT.RooRealVar("multi_pdf_norm","Number of background events", self.nData,0,1e8);
+
+        self.addSystematic("multi_pdf_norm", "flatParam", [])
+
+        getattr(self.w,'import')(cat)
+        getattr(self.w,'import')(multi_pdf)
+        getattr(self.w,'import')(norm_var)
+
+        self.contributions.append({'name':'background','pdf':'multi_pdf','ID':1,'yield':1})
+
 
     def addBkgShapeNoTag(self,name,variable, fname, func_form = "bern",   order=4):
 
         pdfName=name+"_"+self.tag
     
-        MVV=variable
         if self.w.var(MVV) == None: self.w.factory(MVV+"[0,10000]")
 
         poi = self.w.var(MVV)

@@ -691,6 +691,4 @@ def f_test(nParams, nDof, chi2, fit_errs, thresh = 0.05, err_thresh = 0.5):
                 print("Prob not below threshold but previous best was above error threshold, so switch to %i params" % nParams[i])
                 best_i = i
 
-
-
     return best_i
