@@ -244,7 +244,9 @@ def dofit(options):
     #sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, fit_label, bins, label + "_" + fit_label, nPars_bkg, 
             #plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
     #sbfit_prob = ROOT.TMath.Prob(sbfit_chi2, sbfit_ndof)
-    sbfit_chi2=1.0
+    sbfit_chi2= 1.0
+    sbfit_ndof = 1
+    sbfit_prob = 1.0
 
     f_limit_name = (plot_dir + 'higgsCombinelim_{l1}_{l2}.'
                     + 'AsymptoticLimits.mH{mass:.0f}.root'
@@ -330,7 +332,6 @@ def dofit(options):
     results['sbfit_chi2'] = sbfit_chi2
     results['sbfit_ndof'] = sbfit_ndof
     results['sbfit_prob'] = sbfit_prob
-    results['nPars_bkg'] = nPars_bkg
     results['signif'] = signif
     results['asimov_signif'] = exp_signif
     results['asimov_pval'] = exp_pval
