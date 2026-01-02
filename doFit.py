@@ -3,6 +3,7 @@ import pickle
 import json
 import random
 import optparse
+import math
 from Fitter import Fitter, shape_map
 from DataCardMaker import DataCardMaker
 from Utils import *
@@ -23,7 +24,7 @@ def dofit(options):
         #remove old results
         os.system("rm %s" % plot_dir + "fit_results_{}.json".format(options.mass))
 
-    fine_bin_size = 0.05
+    fine_bin_size = 0.1
     mass = options.mass 
     #binsx = list(np.arange(11, 30, 0.5))
     binsx = list(np.arange(11, 20, 0.5))
@@ -69,10 +70,13 @@ def dofit(options):
     nbins_fine = int((binsx[-1] - binsx[0])/fine_bin_size)
     print('nbins_fine', nbins_fine)
 
-    histos_sb = ROOT.TH1F("m_sb", "m_sb" ,nbins_fine, binsx[0], binsx[-1])
+    #transform to 0 to 1 range
+    xmin, xmax = binsx[0], binsx[-1]
+
+    histos_sb = ROOT.TH1F("m_sb", "m_sb" ,nbins_fine, 0., 1.)
     
     
-    load_h5_sb(options.inputFile, histos_sb)
+    load_h5_sb(options.inputFile, histos_sb, xmin=xmin, xmax=xmax)
     print("************ Found %i total events \n" % histos_sb.GetEntries())
     print(histos_sb.Integral())
 
@@ -86,7 +90,6 @@ def dofit(options):
         bins = bins_nonzero
     else:
         bins = binsx
-    roobins = ROOT.RooBinning(len(bins)-1, array('d', bins), "mbins")
 
     if(options.refit_sig):
         print ("########## FIT SIGNAL AND SAVE PARAMETERS ############")
@@ -101,7 +104,7 @@ def dofit(options):
             exit(1)
         sig_file_name = options.sig_shape
 
-    sb_fname = "sb_fit.root"
+    sb_fname = plot_dir + "sb_fit.root"
     sb_outfile = ROOT.TFile(sb_fname, 'RECREATE')
     sb_outfile.cd()
     histos_sb.Write("m_sb")
@@ -111,17 +114,19 @@ def dofit(options):
     poi_name = "m"
 
     print(" CREATE WORKSPACE ") 
-    card = DataCardMaker(fit_label)
+    card = DataCardMaker(fit_label, outdir=plot_dir)
 
-    card.importBinnedData("sb_fit.root", sig_data_name,
+    card.importBinnedData(sb_fname, sig_data_name,
                           poi_name, 'data_obs', 1.0)
 
     if options.dcb_model:
         card.addDCBSignalShape('model_signal_m', sig_file_name,
-                               {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
+                               {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0}, 
+                               xmin=xmin, xmax=xmax)
     else:
         card.addSignalShape('model_signal_m',  sig_file_name,
-                            {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})
+                            {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0},
+                            xmin=xmin, xmax=xmax)
 
 
     sig_norm = card.addFixedYieldFromFile('model_signal_m', 0, sig_file_name,
@@ -136,11 +141,14 @@ def dofit(options):
     fitting_histogram = histos_sb
     data_name = "data_bkg"
 
-    func_forms = ["exp", "bern"]
+    func_forms = {
+            #"exp": [1, 2, 3],
+            "poly": [2, 3, 4,], 
+            "bern": [2, 3, 4,], 
+            }
     #orderToTry = [2, 3, 4]
-    orderToTry = [3,4]
 
-    for func_form in func_forms:
+    for func_form, orderToTry in func_forms.items():
         print("\n \n Fitting with functional form %s " % func_form)
 
         chi2s = [0]*len(orderToTry)
@@ -152,17 +160,17 @@ def dofit(options):
 
         for i, order in enumerate(orderToTry):
             print("Trying %i parameter background fit" % order)
-            bkg_fnames[i] = func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
+            bkg_fnames[i] = plot_dir + func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
 
             nPars = get_nPars(order, func_form)
 
             model_name = "model_b" + str(i)
-            fitter_bkg = Fitter(['m_fine'], debug = False)
-            fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
+            fitter_bkg = Fitter(['m_fine'], debug = False, outdir=plot_dir)
             fitter_bkg.importBinnedData(fitting_histogram, ['m_fine'], data_name)
+            fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
             
             fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
-            #Running fit two times seems to improve things sometimes (better initial guesses for params?)
+            #Running fit two times sometimes seems to improve things sometimes (better initial guesses for params)
             #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
             chi2_fine, ndof_fine = fitter_bkg.projection(
@@ -224,11 +232,11 @@ def dofit(options):
 
 
     cmd = (
-        "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root "
-        + "&& combine -M FitDiagnostics workspace_{l1}_{l2}.root --cminPreFit 1 -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveShapes"
-        + "&& combine -M Significance workspace_{l1}_{l2}.root --usePLC -m {mass} -n significance_{l1}_{l2} "
-        + "&& combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} "
-        ).format(mass=mass, l1=label, l2=fit_label)
+        " cd {plot_dir} ; "
+        + "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root; "
+        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace; "
+        + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2}; "
+        ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label)
     print(cmd)
     os.system(cmd)
     workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
@@ -236,36 +244,35 @@ def dofit(options):
     #sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, fit_label, bins, label + "_" + fit_label, nPars_bkg, 
             #plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
     #sbfit_prob = ROOT.TMath.Prob(sbfit_chi2, sbfit_ndof)
+    sbfit_chi2=1.0
 
-    f_signif_name = ('higgsCombinesignificance_{l1}_{l2}.'
-                     + 'Significance.mH{mass:.0f}.root'
-                     ).format(mass=mass, l1=label, l2=fit_label)
-    f_exp_signif_name = ('higgsCombine_exp_significance_{l1}_{l2}.'
-                     + 'Significance.mH{mass:.0f}.root'
-                     ).format(mass=mass, l1=label, l2=fit_label)
-    f_limit_name = ('higgsCombinelim_{l1}_{l2}.'
+    f_limit_name = (plot_dir + 'higgsCombinelim_{l1}_{l2}.'
                     + 'AsymptoticLimits.mH{mass:.0f}.root'
                     ).format(mass=mass, l1=label, l2=fit_label)
-    f_pval_name = ('higgsCombinepvalue_{l1}_{l2}.'
-                   + 'Significance.mH{mass:.0f}.root'
-                   ).format(mass=mass, l1=label, l2=fit_label)
-    f_diagnostics_name = ('fitDiagnostics_{l1}_{l2}.root'
+    f_diagnostics_name = (plot_dir + 'fitDiagnostics_{l1}_{l2}.root'
                    ).format(l1=label, l2=fit_label)
 
-    f_signif = ROOT.TFile(f_signif_name, "READ")
-    res1 = f_signif.Get("limit")
-    res1.GetEntry(0)
-    signif = res1.limit
-    print("Significance is %.3f \n" % signif)
-
     f_diagnostics = ROOT.TFile(f_diagnostics_name, "READ")
-    params = f_diagnostics.Get("tree_fit_sb")
-    params.GetEntry(0)
-    sig_strength = params.r
-    sig_strength_unc = params.rErr
+    params_sb = f_diagnostics.Get("tree_fit_sb")
+    params_sb.GetEntry(0)
+    sig_strength = params_sb.r
+    sig_strength_unc = params_sb.rErr
+    nll_sb = params_sb.nll_min
 
 
-    #expected significance
+    print("Signal strength is %.3f +/- %.3f" % (sig_strength, sig_strength_unc))
+
+    params_b = f_diagnostics.Get("tree_fit_b")
+    params_b.GetEntry(0)
+    nll_b = params_b.nll_min
+
+    delta_ll = nll_b - nll_sb
+    signif = np.sqrt(2 * delta_ll)
+    pval = 0.5 * math.erfc(signif / math.sqrt(2))
+
+    print("Asymptotic significance (from dLL) is %.2f" % (signif))
+
+
     print('sig_norm %.3f' % sig_norm)
 
 
@@ -273,18 +280,9 @@ def dofit(options):
     true_sig_strength = get_sig_in_window(options.inputFile, binsx[0], binsx[-1]) /  sig_norm
     print("True sig strength %.3f" % true_sig_strength)
 
-    cmd = ("combine -M Significance workspace_mumu_{l1}_{l2}.root -t -1 --expectSignal %.3f --toysFreq " % (true_sig_strength)
-        + "-m {mass} -n _exp_significance_{l1}_{l2} ").format(mass = mass, l1 = label, l2 = fit_label)
-    print(cmd)
-    os.system(cmd)
-
-    f_exp_signif = ROOT.TFile(f_exp_signif_name, "READ")
-    res_e = f_exp_signif.Get("limit")
-    res_e.GetEntry(0)
-    exp_signif = res_e.limit
-
-    exp_pval = 0.5-(0.5*(1+ROOT.Math.erf(exp_signif/np.sqrt(2)))-0.5*(1+ROOT.Math.erf(0/np.sqrt(2))))
-    print("Asimov significance is %.3f \n" % exp_signif)
+    #expected significance TODO
+    exp_signif = 0.5
+    exp_pval = 1.0
 
 
     f_limit = ROOT.TFile(f_limit_name, "READ")
@@ -313,30 +311,13 @@ def dofit(options):
     print("Expected was %.3f (%.1f events)" % (exp_limit, exp_limit*sig_norm))
     print("Expected range %.1f-%.1f (one sigma), %.1f-%.1f (two sigma)" % (exp_low * sig_norm, exp_high*sig_norm, exp_two_low * sig_norm, exp_two_high * sig_norm))
 
-    f_pval = ROOT.TFile(f_pval_name, "READ")
-    res3 = f_pval.Get("limit")
-    res3.GetEntry(0)
-    pval = res3.limit
-    print("p-value is %.3f \n" % pval)
 
-    #signal yeild in +/- 2 sigma
+    #signal yield in +/- 2 sigma
     check_rough_sig(options.inputFile, options.mass*0.9, options.mass*1.1)
 
-    f_diagnostics = ROOT.TFile(f_diagnostics_name, "READ")
-    f_diagnostics.ls()
-    params = f_diagnostics.Get("tree_fit_sb")
-    params.GetEntry(0)
-    sig_strength = params.r
-    sig_strength_unc = params.rErr
-    print('r ', sig_strength, 'unc', sig_strength_unc)
 
-
-    f_signif.Close()
     f_limit.Close()
-    f_pval.Close()
     f_diagnostics.Close()
-
-
 
     results = dict()
 

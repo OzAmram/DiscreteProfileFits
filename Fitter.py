@@ -5,13 +5,106 @@ from array import array
 import os,sys
 ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.ERROR)
 
+def scaledVariable(m, name='x'):
+    #rescale range of variable to 0 to 1
+
+    mini = m.getMin()
+    maxi = m.getMax()
+    old_name = m.GetName()
+    x = ROOT.RooFormulaVar (name, "(%s - %.10f) / (%.10f - %.10f)" % (old_name, mini, maxi, mini), ROOT.RooArgList(m));
+
+    return x
+
+
+def polyShape(name = 'model', poi = None, order=4, start_vals=None):
+    #sum of bernstein polynomials
+
+    #initial values
+    start_val = 1.0
+    pmin = -20.0
+    pmax = 20.0
+
+    par_list = ROOT.RooArgList()
+    p_objs = []
+    par_names = []
+    for i in range(order):
+        poly_par = ROOT.RooRealVar(f"poly_p{i}", f"poly_p{i}", start_val, pmin, pmax)
+        par_list.add(poly_par)
+        par_names.append(f"poly_p{i}")
+        p_objs.append(poly_par)
+
+    shape = ROOT.RooPolynomial(name+"_shape", name+"_shape", poi, par_list)
+
+    return shape, par_names, p_objs
+
+
+def bernShape(name = 'model', poi = None, order=4, start_vals=None):
+    #sum of bernstein polynomials
+
+    #initial values
+    start_val = 1.0
+    pmin = 0.0
+    pmax = 20.0
+
+    par_list = ROOT.RooArgList()
+    p_objs = []
+    par_names = []
+    for i in range(order):
+        poly_par = ROOT.RooRealVar(f"bern_p{i}", f"bern_p{i}", start_val, pmin, pmax)
+        par_list.add(poly_par)
+        par_names.append(f"bern_p{i}")
+        p_objs.append(poly_par)
+
+
+    shape = ROOT.RooBernstein(name+"_shape", name+"_shape", poi, par_list)
+
+    return shape, par_names, p_objs
+
+
+def expShape(name, poi = None, order=4, start_vals=None):
+    #Sum of exponentials
+
+    #initial values
+    p_init = -0.5
+    pmin = -20.0
+    pmax = 20.0
+
+    c_init = 0.2
+    cmin = 0.
+    cmax = 1.
+
+    
+    p_objs = []
+    par_names = []
+    e_list = ROOT.RooArgList()
+    c_list = ROOT.RooArgList()
+
+    for i in range(order):
+        exp_par = ROOT.RooRealVar(f"exp_p{i}", f"exp_p{i}", p_init, pmin, pmax)
+        exp = ROOT.RooExponential(f"exp_{i}", f"exp_{i}", poi, exp_par)
+        coef = ROOT.RooRealVar(f"exp_c{i}", f"exp_c{i}", c_init, cmin, cmax)
+
+        e_list.add(exp)
+        par_names.append(f"exp_p{i}")
+
+        if(i<(order-1)): # don't include last coeff because redundant
+            c_list.add(coef)
+            par_names.append(f"exp_c{i}")
+
+        p_objs.extend([exp_par, exp, coef])
+
+    recursiveFraction=True
+    shape = ROOT.RooAddPdf(name+"_shape", name+"_shape", e_list, c_list, recursiveFraction)
+
+    return shape, par_names, p_objs
+
 def polyExpShape(name = 'model', poi = None, order=4, start_vals=None):
     #Sum of exponentials
 
     #initial values
     p_init = 0.0
-    pmin = -10.0
-    pmax = 10.0
+    pmin = -20.0
+    pmax = 20.0
 
     c_init = 0.2
     cmin = 0.
@@ -35,69 +128,11 @@ def polyExpShape(name = 'model', poi = None, order=4, start_vals=None):
 
     return shape, par_names, p_objs
 
-def bernShape(name = 'model', poi = None, order=4, start_vals=None):
-    #sum of bernstein polynomials
-
-    #initial values
-    if(start_vals is None):
-        start_vals = [0.2, 1.5, 2.0, 2.0, 2.0]
-    pmin = 0.0
-    pmax = 20.0
-
-    par_list = ROOT.RooArgList(poi)
-    p_objs = []
-    par_names = []
-    for i in range(order):
-        poly_par = ROOT.RooRealVar(f"bern_p{i}", f"bern_p{i}", start_vals[i], pmin, pmax)
-        par_list.add(poly_par)
-        par_names.append(f"bern_p{i}")
-        p_objs.append(poly_par)
-
-    shape = ROOT.RooBernstein(name+"_shape", name+"_shape", poi, par_list)
-
-    return shape, par_names, p_objs
-
-
-def expShape(name, poi = None, order=4, start_vals=None):
-    #Sum of exponentials
-
-    #initial values
-    p_init = -0.5
-    pmin = -10.0
-    pmax = 10.0
-
-    c_init = 0.2
-    cmin = 0.
-    cmax = 1.
-
-    e_list = ROOT.RooArgList()
-    c_list = ROOT.RooArgList()
-    par_names = []
-    objs = []
-
-    for i in range(order):
-        exp_par = ROOT.RooRealVar(f"exp_p{i}", f"exp_p{i}", p_init, pmin, pmax)
-        exp = ROOT.RooExponential(f"exp_{i}", f"exp_{i}", poi, exp_par)
-        coef = ROOT.RooRealVar(f"exp_c{i}", f"exp_c{i}", c_init, cmin, cmax)
-
-        e_list.add(exp)
-        par_names.append(f"exp_p{i}")
-
-        if(i<(order-1)): # don't include last coeff because redundant
-            c_list.add(coef)
-            par_names.append(f"exp_c{i}")
-
-        objs.extend([exp_par, exp, coef])
-
-    recursiveFraction=True
-    shape = ROOT.RooAddPdf(name+"_shape", name+"_shape", e_list, c_list, recursiveFraction)
-
-    return shape, par_names, objs
-
 
 shape_map = {
         "polyExp" : polyExpShape,
         "bern": bernShape,
+        "poly": polyShape,
         "exp": expShape
 
         }
@@ -105,10 +140,11 @@ shape_map = {
 
 
 class Fitter(object):
-    def __init__(self,poi = ['x'], debug = False):
+    def __init__(self,poi = ['x'], debug = False, outdir=""):
         self.cache_name = "cache%i.root"%(random.randint(0, 1e+6))
         print("Making cache %s "  % self.cache_name)
         self.cache=ROOT.TFile(self.cache_name,"RECREATE")
+        self.outdir = outdir
         self.cache.cd()
         self.debug = debug
         self.cleanedup = False
@@ -209,7 +245,7 @@ class Fitter(object):
 
         if fitresults:
             fitresults.Print() 
-            f = ROOT.TFile.Open('fitresults.root','RECREATE')
+            f = ROOT.TFile.Open(self.outdir + 'fitresults.root','RECREATE')
             fitresults.SetName("fitresults")
             fitresults.Write()
             f.Close()	 
@@ -230,7 +266,7 @@ class Fitter(object):
     def projection(self,model = "model",data="data",poi="x",filename="fit.root",binning=0,logy=False,xtitle='x',mass=1000):
 
 
-        f = ROOT.TFile.Open("fitresults.root",'READ')
+        f = ROOT.TFile.Open(self.outdir + "fitresults.root",'READ')
 
         linear_errors = False
         ndata = self.w.data(data).numEntries()
@@ -329,12 +365,8 @@ class Fitter(object):
         if(type(poi) == str): poi = self.w.var(poi)
 
 
-        if(func_form == 'bern'):
-            shape, par_names, objs = bernShape(name = name, poi=poi, order=order, start_vals=start_vals)
-        elif(func_form == 'polyExp'):
-            shape, par_names, objs = polyExpShape(name = name, poi=poi, order=order, start_vals=start_vals)
-        elif(func_form == 'exp'):
-            shape, par_names, objs = expShape(name = name, poi=poi, order=order, start_vals=start_vals)
+        if(func_form in shape_map.keys()):
+            shape, par_names, objs = shape_map[func_form](name = name, poi=poi, order=order, start_vals=start_vals)
         else:
             print("Shape %s not implemented!" % shape)
             exit(1)

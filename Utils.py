@@ -453,13 +453,15 @@ def get_masses_max(h_file):
         return np.amax(masses)
 
 
-def load_h5_sb(h_file, hist, correctStats=False, sb1_edge = -1., sb2_edge = -1.):
+def load_h5_sb(h_file, hist, correctStats=False, xmin=-1.0, xmax=-1.0):
     event_num = None
     with h5py.File(h_file, "r") as f:
         masses = np.array(f['masses'][()])
         if(correctStats):
             event_num = f['event_num'][()]
 
+    if(xmin >0. and xmax >0.): #scale to 0 to 1
+        masses = (masses - xmin) / (xmax - xmin)
     fill_hist(masses, hist, event_num)
 
 def load_h5_bkg(h_file, hist, correctStats = False):

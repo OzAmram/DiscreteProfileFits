@@ -8,10 +8,11 @@ from Fitter import Fitter
 ROOT.RooMsgService.instance().setGlobalKillBelow(ROOT.RooFit.WARNING)
 
 class DataCardMaker:
-    def __init__(self,tag):
+    def __init__(self,tag, outdir=""):
         self.systematics=[]
         self.tag="mass"+"_"+tag
-        self.rootFile = ROOT.TFile("datacardInputs_%s.root"%self.tag,"RECREATE")
+        self.outdir = outdir
+        self.rootFile = ROOT.TFile(self.outdir + "datacardInputs_%s.root"%self.tag,"RECREATE")
         self.rootFile.cd()
         self.w=ROOT.RooWorkspace("w","w")
         self.luminosity = 1.0
@@ -33,7 +34,7 @@ class DataCardMaker:
       
     def makeCard(self):
 
-        f = open("datacard_"+self.tag+'.txt','w')
+        f = open(self.outdir + "datacard_"+self.tag+'.txt','w')
         f.write('imax 1\n')
         f.write('jmax {n}\n'.format(n=len(self.contributions)-1))
         f.write('kmax *\n')
@@ -110,8 +111,12 @@ class DataCardMaker:
                     if not has:
                             f.write('-\t' )
                 f.write('\n' )  
+
+        #include discrete profiling nuisance
+        f.write("pdf_index discrete")
                         
         f.close()
+
 
 
         self.rootFile.cd()
@@ -169,7 +174,7 @@ class DataCardMaker:
         self.contributions.append({'name':name,'pdf':pdfName,'ID':ID,'yield':events})
         return events
 
-    def addDCBSignalShape(self, name, jsonFile, scale={}, resolution={}):
+    def addDCBSignalShape(self, name, jsonFile, scale={}, resolution={}, xmin=-1.0, xmax = -1.0):
 
         pdfName="_".join([name,self.tag])
         
@@ -208,6 +213,10 @@ class DataCardMaker:
         sign_oneG.GetPoint(0,x,sign_one)
         sign_two = ctypes.c_double(0.0)
         sign_twoG.GetPoint(0,x,sign_two)
+
+        if(xmin > 0. and xmax > 0.): #account for rescaling
+            mean = (mean - xmin)/(xmax - xmin)
+            sigma = sigma / (xmax - xmin)
 
         print("adding mean")
         meanVar = "_".join(["MEAN",name,self.tag])
@@ -250,7 +259,7 @@ class DataCardMaker:
         return dcb
 
 
-    def addSignalShape(self,name,jsonFile,scale ={},resolution={}):
+    def addSignalShape(self,name,jsonFile,scale ={},resolution={}, xmin=-1.0, xmax = -1.0):
     
         pdfName="_".join([name,self.tag])
     
@@ -294,6 +303,11 @@ class DataCardMaker:
         sigfracG.GetPoint(0,x,sigfrac)
         sign = ctypes.c_double(0.0)
         signG.GetPoint(0,x,sign)
+
+
+        if(xmin > 0. and xmax > 0.): #account for rescaling
+            mean = (mean - xmin)/(xmax - xmin)
+            sigma = sigma / (xmax - xmin)
             
         
         print("adding mean")
