@@ -16,7 +16,7 @@ The signal shape parameters can be obtained by fitting the signal masses with a 
 `python3 fit_signalshapes.py -i test_signal_masses.h5 --dcb-model -M 15 -o sig_test/`
 
 The `-M` option gives the resonance mass of the signal being fit. Output is stored in the directory specified by `-o`.
-This creates a file containing the signal shape parameters in `sig_test/sig_fit_15.root` (WIP change this to a json for ease of use). 
+This creates a file containing the signal shape parameters in `sig_test/sig_fit_15.root` (TODO: change this to a json for ease of use). 
 
 (TODO: signal shape interpolation between mass points) 
 
