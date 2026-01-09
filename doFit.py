@@ -13,7 +13,7 @@ from fit_signalshapes import  fit_signalmodel
 def dofit(options):
 
     label = options.label
-    plot_dir = options.plotDir
+    plot_dir = options.outDir
     if(plot_dir[-1] != '/'):
         plot_dir += '/'
 
@@ -26,40 +26,7 @@ def dofit(options):
 
     fine_bin_size = 0.1
     mass = options.mass 
-    #binsx = list(np.arange(11, 30, 0.5))
-    binsx = list(np.arange(11, 20, 0.5))
-
-    if(options.m_max < 0. and options.rebin): 
-        options.m_max = get_m_max(options.inputFile) + 5.0
-        options.m_max = max(1.2*options.mass, options.m_max)
-    #print("m MAX %.2f" % options.m_max)
-    
-    if(options.m_min > 0 and options.m_min < binsx[-1]):
-        start_idx = 0
-        while(binsx[start_idx] < options.m_min):
-            start_idx +=1
-        binsx = binsx[start_idx:]
-
-        if(abs(options.m_min - binsx[0]) < 50.):
-            binsx[0] = options.m_min
-        else:
-            binsx.insert(0, options.m_min)
-        print("Will start fit from %.0f GeV" % binsx[0])
-
-    if(options.m_max > 0 and options.m_max < binsx[-1]):
-        print("rebinning with max m %.2f" % options.m_max)
-        end_idx = len(binsx)-1
-        while(binsx[end_idx]   > options.m_max and end_idx > 0): 
-            end_idx -=1
-        binsx = binsx[:end_idx]
-
-        if(abs(options.m_max - binsx[-1]) < 50.):
-            binsx[-1] = options.m_max
-        else:
-            binsx.append(options.m_max)
-        print("Will end fit at %.0f GeV" % binsx[-1])
-        print(binsx)
-
+    binsx = list(np.arange(options.m_min, options.m_max + options.bin_size, options.bin_size))
 
     # round to smallest precision we are storing mass values with, otherwise
     # get weird effects related to bin size
@@ -142,8 +109,8 @@ def dofit(options):
     data_name = "data_bkg"
 
     func_forms = {
-            #"exp": [1, 2, 3],
-            "poly": [2, 3, 4,], 
+            "exp": [1, 2, 3],
+            #"poly": [2, 3, 4,], 
             "bern": [2, 3, 4,], 
             }
     #orderToTry = [2, 3, 4]
@@ -360,35 +327,38 @@ def dofit(options):
 
 def fitting_options():
     parser = optparse.OptionParser()
+    parser.add_option("-M", "-M", dest="mass", type=float, default=15.,
+                      help="Signal mass hypothesis")
+    parser.add_option("-i", "--inputFile", dest="inputFile",
+                      default='fit_inputs/no_selection_03p.h5',
+                      help="input h5 file")
+    parser.add_option("-o", "--outDir", dest="outDir", default='plots/',
+                      help="Where to put the output")
+    parser.add_option("-s", "--sig_shape", default="sig_shape_M15.root",
+                      help="Pre-saved signal shape")
+
+    parser.add_option("--m-min", type=float, default=11.0,
+                      help="Minimum m for the fit")
+    parser.add_option("--m-max", type=float, default=20.0,
+                      help="Maximum m for the fit")
+    parser.add_option("--bin-size", type=float, default=0.2,
+                      help="Size of bins")
+
     parser.add_option("--scale_j_unc", type=float, default=0.01,
                       help="Uncertainty on signal mean from JES")
     parser.add_option("--res_j_unc", type=float, default=0.035,
                       help="Uncertainty on signal width from JER")
-
-    parser.add_option("--m_min", type=float, default=-1.0,
-                      help="Minimum m for the fit")
-    parser.add_option("--m_max", type=float, default=-1.0,
-                      help="Maximum m for the fit")
     parser.add_option("--sig_norm", type=float, default=100.0,
                       help="Signal normalization (definition of mu=1)")
     parser.add_option("--ftest_thresh", type=float, default=0.05,
                       help="Threshold to prefer a function in the f-test")
     parser.add_option("--err_thresh", type=float, default=0.5,
                       help="Threshold on fit unc to be included in f-test")
-    parser.add_option("-s", "--sig_shape", default="sig_shape_M15.root",
-                      help="Pre-saved signal shape")
     parser.add_option("--refit_sig", default=False, action="store_true",
                       help="""Fit the signal events (using truth labels)
                       to get signal shape""")
     parser.add_option("--rebin", default=False, action="store_true",
                       help="""Rebin  to make sure no bins less than 5 evts""")
-    parser.add_option("-M", "-M", dest="mass", type=float, default=15.,
-                      help="Signal mass hypothesis")
-    parser.add_option("-i", "--inputFile", dest="inputFile",
-                      default='fit_inputs/no_selection_03p.h5',
-                      help="input h5 file")
-    parser.add_option("-p", "--plotDir", dest="plotDir", default='plots/',
-                      help="Where to put the plots")
     parser.add_option("-l", "--label", dest="label", default='test',
                       help="Label for file names")
     parser.add_option("--no_draw_sig", dest="draw_sig", action = 'store_false', help="Don't draw separate signal and bkg contribution on S+B fit plots")
