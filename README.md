@@ -9,8 +9,27 @@ The data is then fit with the various choices of functional forms describing the
 For each functional form an F-test is performed to select the optimal number of parameters. 
 Then, a signal plus background fit is performed using combine. Discrete profiling is used to include all functional forms, each with their determined optimal number of parameters. 
 
+Installation:
 
-The input files containing masses should be h5 files with a single field called `masses`. 
+This framework relies on Combine. You should follow the latest recommendations for Combine [link](https://cms-analysis.github.io/HiggsAnalysis-CombinedLimit/latest/#within-cmssw-recommended-for-cms-users)
+The instructions for the current recommended version (v10.4.2) are:
+
+```
+cmsrel CMSSW_14_1_0_pre4
+cd CMSSW_14_1_0_pre4/src
+cmsenv
+git -c advice.detachedHead=false clone --depth 1 --branch v10.4.2 https://github.com/cms-analysis/HiggsAnalysis-CombinedLimit.git HiggsAnalysis/CombinedLimit
+cd HiggsAnalysis/CombinedLimit
+scramv1 b clean; scramv1 b -j$(nproc --ignore=2) # always make a clean build, with n - 2 cores on the system
+```
+
+You can then clone this repo somewhere inside the `src/` directory of the CMSSW release. 
+`git clone git@github.com:OzAmram/DiscreteProfileFits.git` 
+
+Running the fit:
+
+The input files containing masses to be fit should be h5 files with a single field called `masses`. 
+
 The signal shape parameters can be obtained by fitting the signal masses with a command like:
 
 `python3 fit_signalshapes.py -i test_signal_masses.h5 --dcb-model -M 15 -o sig_test/`
