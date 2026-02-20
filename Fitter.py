@@ -165,39 +165,30 @@ class Fitter(object):
         os.system("rm %s" % self.cache_name)
         self.cleanedup = True
 
-    def importBinnedData(self,histogram,poi = ["x"],name = "data", regions=[]):
+    def importBinnedData(self,histogram,poi = "x",name = "data", regions=[]):
         cList = ROOT.RooArgList()
-        for i,p in enumerate(poi):
-            var = self.w.var(p)
-            cList.add(var)
-            if i==0:
-                axis=histogram.GetXaxis()
-            elif i==1:
-                axis=histogram.GetYaxis()
-            elif i==2:
-                axis=histogram.GetZaxis()
-            else:
-                print ('Asking for more than 3 D . ROOT doesnt support that, use unbinned data instead')
-                return
-            mini=axis.GetXmin()
-            maxi=axis.GetXmax()
-            bins=axis.GetNbins()
-            binningx =[]
-            for i in range(1,bins+2):
-                #v = mmin + i * (mmax-mmin)/float(N)
-                binningx.append(axis.GetBinLowEdge(i))
-            if(len(regions) == 0):
-                var.setMax(maxi)
-                var.setMin(mini)
-            else:
-                for reg_name,reg_low,reg_high in regions:
-                    var.setRange(reg_name, reg_low, reg_high)
-            if(self.debug): 
-                print (" set binning "+str(binningx)) 
-            var.setBinning(ROOT.RooBinning(len(binningx)-1,array("d",binningx)))
-            #a = self.w.var(p).getBinning()
-            #for b in range(0,a.numBins()+1):
-                #print a.binLow(b)
+        var = self.w.var(poi)
+        cList.add(var)
+        axis=histogram.GetXaxis()
+        mini=axis.GetXmin()
+        maxi=axis.GetXmax()
+        bins=axis.GetNbins()
+        binningx =[]
+        for i in range(1,bins+2):
+            binningx.append(axis.GetBinLowEdge(i))
+
+        if(len(regions) == 0):
+            var.setMax(maxi)
+            var.setMin(mini)
+        else:
+            for reg_name,reg_low,reg_high in regions:
+                var.setRange(reg_name, reg_low, reg_high)
+        if(self.debug): 
+            print (" set binning "+str(binningx)) 
+        var.setBinning(ROOT.RooBinning(len(binningx)-1,array("d",binningx)))
+        #a = self.w.var(p).getBinning()
+        #for b in range(0,a.numBins()+1):
+            #print a.binLow(b)
         dataHist=ROOT.RooDataHist(name,name,cList,histogram)
         getattr(self.w,'import')(dataHist)
 
@@ -263,7 +254,7 @@ class Fitter(object):
         self.legend.SetMargin(0.35)
         return self.legend
 
-    def projection(self,model = "model",data="data",poi="x",filename="fit.root",binning=0,logy=False,xtitle='x',mass=1000):
+    def projection(self,model="model",data="data",poi="x",filename="fit.root",binning=0,logy=False,xtitle='x',show_error=True, mass=1000):
 
 
         f = ROOT.TFile.Open(self.outdir + "fitresults.root",'READ')
@@ -272,6 +263,8 @@ class Fitter(object):
         ndata = self.w.data(data).numEntries()
         self.frame=self.w.var(poi).frame(ROOT.RooFit.Bins(ndata))
         nbins = self.w.var(poi).getBinning().numBins()
+        if(binning == 0): binning = self.w.var(poi).getBinning()
+
 
         if f: 
             fr = f.Get('fitresults')
@@ -280,25 +273,13 @@ class Fitter(object):
             print("No fit result found (fitresults.root), plotting model only")
 
         if binning:
-            self.w.data(data).plotOn(self.frame,ROOT.RooFit.Binning(binning),ROOT.RooFit.Invisible())
+            self.w.data(data).plotOn(self.frame,ROOT.RooFit.Invisible())
             if fr: 
-                self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.VisualizeError(fr,1, linear_errors),ROOT.RooFit.FillColor(ROOT.kRed-7),ROOT.RooFit.LineColor(ROOT.kRed-7),ROOT.RooFit.Name(fr.GetName()))
+                if(show_error):
+                    self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.VisualizeError(fr,1, linear_errors),ROOT.RooFit.FillColor(ROOT.kRed-7),ROOT.RooFit.LineColor(ROOT.kRed-7),ROOT.RooFit.Name(fr.GetName()))
                 self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.LineColor(ROOT.kRed+1))	 
-            self.w.data(data).plotOn(self.frame,ROOT.RooFit.Binning(binning))
-        else: 
-            self.w.data(data).plotOn(self.frame,
-                                     ROOT.RooFit.DataError(ROOT.RooAbsData.Poisson),
-                                     ROOT.RooFit.Binning(nbins),
-                                     ROOT.RooFit.Invisible()
-                                    )
-            if fr: 
-                self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.VisualizeError(fr,1, linear_errors),ROOT.RooFit.FillColor(ROOT.kRed-7),ROOT.RooFit.LineColor(ROOT.kRed-7),ROOT.RooFit.Name(fr.GetName()))
-                self.w.pdf(model).plotOn(self.frame,ROOT.RooFit.LineColor(ROOT.kRed+1))
+            self.w.data(data).plotOn(self.frame, ROOT.RooFit.DataError(ROOT.RooAbsData.Poisson))
 
-            self.w.data(data).plotOn(self.frame,
-                                     ROOT.RooFit.DataError(ROOT.RooAbsData.Poisson),
-                                     ROOT.RooFit.Binning(nbins)
-                                    )
         self.legend = self.getLegend()
         self.legend.AddEntry( self.w.pdf(model)," Full PDF","l")
 
@@ -327,8 +308,37 @@ class Fitter(object):
 
         return chi2_val, ndof
 
+    def signalGaus(self,name = 'model',poi="MVV",mass=0):
+        #single crystall ball plus gaussian
 
-    def signalResonance(self,name = 'model',poi="MVV",mass=0):
+        ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
+
+        self.w.factory("MH[1000]")
+        self.w.factory("mean[%.1f,%.1f,%.1f]"%(mass,0.8*mass,1.2*mass))
+        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.02,mass*0.005,mass*0.10))
+        self.w.factory("Gaussian::"+name+"(%s,mean,gsigma)"%poi)
+
+        self.sig_shape_params = ['mean', 'sigma'] 
+    
+
+    def signalCB(self,name = 'model',poi="MVV",mass=0):
+        #single crystall ball plus gaussian
+
+        ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
+
+        self.w.factory("MH[1000]")
+        self.w.factory("mean[%.1f,%.1f,%.1f]"%(mass,0.8*mass,1.2*mass))
+        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.02,mass*0.005,mass*0.10))
+        self.w.factory("alpha[0.85,0.60,1.20]")
+        self.w.factory("sign[6,0.1,150]")
+        self.w.factory("CBShape::"+name+"(%s,mean,sigma,alpha,sign)"%poi)
+
+        self.sig_shape_params = ['mean', 'sigma', 'alpha', 'sign']
+
+
+
+    def signalCBGaus(self,name = 'model',poi="MVV",mass=0):
+        #single crystall ball plus gaussian
 
         ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
 
@@ -343,8 +353,11 @@ class Fitter(object):
         self.w.factory("Gaussian::gauss(%s,mean,gsigma)"%poi)
         self.w.factory("CBShape::cb(%s,mean,sigma,alpha,sign)"%poi)
         self.w.factory('SUM::'+name+'(sigfrac[0.0,0.0,0.850]*gauss,cb)')
+
+        self.sig_shape_params = ['mean', 'sigma', 'alpha', 'sign', 'scalesigma', 'sigfrac']
     
     def signalDCB(self, name='model', poi="MVV", mass=0):
+        #double crystall ball
     
         ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
         
@@ -356,6 +369,22 @@ class Fitter(object):
         self.w.factory("sign[5,0,600]")
         self.w.factory("sign2[5,0,50]")
         self.w.factory("DoubleCB::"+name+"(%s,mean,sigma,alpha,sign,alpha2,sign2)"%poi)
+
+        self.sig_shape_params = ['mean', 'sigma', 'alpha', 'sign', 'alpha2', 'sign2']
+
+    def signalShape(self, name='model', poi='MVV', mass=0, shape='gaus'):
+        if(shape == 'gaus'):
+            self.signalGaus(name,poi,mass)
+        elif(shape == 'CB'):
+            self.signalCB(name,poi,mass)
+        elif(shape == 'DCB'):
+            self.signalDCB(name,poi,mass)
+        elif(shape == 'CBgaus'):
+            self.signalCBGaus(name,poi,mass)
+        else:
+            print("Unknown signal shape %s" % shape)
+            exit(1)
+        return
 
 
 
@@ -380,7 +409,6 @@ class Fitter(object):
 
         model = ROOT.RooExtendPdf(name, name, shape, norm_var)
 
-        print("bkg shape")
         getattr(self.w,'import')(model)
         self.objs.append((shape, norm_var, model))
 

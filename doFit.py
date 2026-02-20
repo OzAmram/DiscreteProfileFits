@@ -28,11 +28,6 @@ def dofit(options):
     mass = options.mass 
     binsx = list(np.arange(options.m_min, options.m_max + options.bin_size, options.bin_size))
 
-    # round to smallest precision we are storing mass values with, otherwise
-    # get weird effects related to bin size
-    #roundTo(binsx, fine_bin_size)
-
-
 
     nbins_fine = int((binsx[-1] - binsx[0])/fine_bin_size)
     print('nbins_fine', nbins_fine)
@@ -105,16 +100,16 @@ def dofit(options):
         print("BLIND FIT TO DO ")
         exit(1)
 
+    # Normalized bin edges in 0-1 space (workspace variable range) — used for post-fit plot
+    bins_norm = [(b - xmin) / (xmax - xmin) for b in binsx]
+
     fitting_histogram = histos_sb
     data_name = "data_bkg"
 
     func_forms = {
-            "exp": [1, 2, 3],
-            #"poly": [2, 3, 4,], 
-            "bern": [2, 3, 4,], 
+            "exp": [1, 2, 3, 4],
+            "bern": [2, 3, 4, 5], 
             }
-    #orderToTry = [2, 3, 4]
-
     for func_form, orderToTry in func_forms.items():
         print("\n \n Fitting with functional form %s " % func_form)
 
@@ -133,7 +128,7 @@ def dofit(options):
 
             model_name = "model_b" + str(i)
             fitter_bkg = Fitter(['m_fine'], debug = False, outdir=plot_dir)
-            fitter_bkg.importBinnedData(fitting_histogram, ['m_fine'], data_name)
+            fitter_bkg.importBinnedData(fitting_histogram, 'm_fine', data_name)
             fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
             
             fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
@@ -196,8 +191,6 @@ def dofit(options):
     card.makeCard()
     #card.delete()
 
-
-
     cmd = (
         " cd {plot_dir} ; "
         + "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root; "
@@ -208,18 +201,12 @@ def dofit(options):
     os.system(cmd)
     workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
 
-    #sbfit_chi2, sbfit_ndof = checkSBFit(workspace_name, fit_label, bins, label + "_" + fit_label, nPars_bkg, 
-            #plot_dir = plot_dir, draw_sig = options.draw_sig, plot_label = label)
-    #sbfit_prob = ROOT.TMath.Prob(sbfit_chi2, sbfit_ndof)
-    sbfit_chi2= 1.0
-    sbfit_ndof = 1
-    sbfit_prob = 1.0
-
     f_limit_name = (plot_dir + 'higgsCombinelim_{l1}_{l2}.'
                     + 'AsymptoticLimits.mH{mass:.0f}.root'
                     ).format(mass=mass, l1=label, l2=fit_label)
     f_diagnostics_name = (plot_dir + 'fitDiagnostics_{l1}_{l2}.root'
                    ).format(l1=label, l2=fit_label)
+
 
     f_diagnostics = ROOT.TFile(f_diagnostics_name, "READ")
     params_sb = f_diagnostics.Get("tree_fit_sb")
@@ -236,6 +223,9 @@ def dofit(options):
     nll_b = params_b.nll_min
 
     delta_ll = nll_b - nll_sb
+    print("dLL is %.2e" % delta_ll)
+
+    delta_ll = max(delta_ll, 0.)
     signif = np.sqrt(2 * delta_ll)
     pval = 0.5 * math.erfc(signif / math.sqrt(2))
 
@@ -291,14 +281,6 @@ def dofit(options):
     results = dict()
 
     # bkg fit results
-    results['bkgfit_chi2'] = chi2s[best_i]
-    results['bkgfit_ndof'] = ndofs[best_i]
-    results['bkgfit_prob'] = probs[best_i]
-    results['bkgfit_frac_err'] = fit_errs[best_i]
-    results['bkg_fit_params'] = fit_params[best_i]
-    results['sbfit_chi2'] = sbfit_chi2
-    results['sbfit_ndof'] = sbfit_ndof
-    results['sbfit_prob'] = sbfit_prob
     results['signif'] = signif
     results['asimov_signif'] = exp_signif
     results['asimov_pval'] = exp_pval
@@ -334,7 +316,7 @@ def fitting_options():
                       help="input h5 file")
     parser.add_option("-o", "--outDir", dest="outDir", default='plots/',
                       help="Where to put the output")
-    parser.add_option("-s", "--sig_shape", default="sig_shape_M15.root",
+    parser.add_option("-s", "--sig_shape", default="sig_shape_M15.json",
                       help="Pre-saved signal shape")
 
     parser.add_option("--m-min", type=float, default=11.0,

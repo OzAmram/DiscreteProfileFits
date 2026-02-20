@@ -153,9 +153,6 @@ class DataCardMaker:
     
     def addFixedYieldFromFile(self,name,ID,filename,histoName,norm = 1680.0):
         pdfName="_".join([name,self.tag])
-        f=ROOT.TFile(filename)
-        #histogram=f.Get(histoName)
-        #events=histogram.Integral()*self.luminosity*constant
 
         self.contributions.append({'name':name,'pdf':pdfName,'ID':ID,'yield':norm})
         return norm
@@ -163,10 +160,6 @@ class DataCardMaker:
     def addFloatingYield(self,name,ID,filename,histoName,mini=0,maxi=1e+9,constant=False):
         pdfName="_".join([name,self.tag])
         pdfNorm="_".join([name,self.tag,"norm"])
-        f=ROOT.TFile(filename)
-        #histogram=f.Get(histoName)
-        #import pdb; pdb.set_trace()
-        #events=histogram.Integral()
         events=100.0
         self.w.factory("{name}[{val},{mini},{maxi}]".format(name=pdfNorm,val=events,mini=mini,maxi=maxi))       
         if constant:
@@ -174,9 +167,20 @@ class DataCardMaker:
         self.contributions.append({'name':name,'pdf':pdfName,'ID':ID,'yield':events})
         return events
 
+    def addSigShape(name, jsonFile, **args):
+        with open(jsonFile, 'r') as f:
+            params = json.load(f)
+
+        if(params['shape'] == 'DCB'):
+            self.addDCBSignalShape(name, params, **args)
+
     def addDCBSignalShape(self, name, jsonFile, scale={}, resolution={}, xmin=-1.0, xmax = -1.0):
 
         pdfName="_".join([name,self.tag])
+
+        with open(jsonFile, 'r') as f:
+            params = json.load(f)
+
         
         scaleStr='0'
         resolutionStr='0'
@@ -192,27 +196,9 @@ class DataCardMaker:
             resolutionStr=resolutionStr+"+{factor}*{syst}".format(factor=factor,syst=syst)
             resolutionSysts.append(syst)
             
-        f = ROOT.TFile(jsonFile,'READ')
-        meanG = f.Get('mean')
-        sigmaG = f.Get('sigma')
-        alpha_oneG = f.Get('alpha')
-        sign_oneG = f.Get('sign')
-        alpha_twoG = f.Get('alpha2')
-        sign_twoG = f.Get('sign2')
-
         x = ctypes.c_double(0.0)
-        mean = ctypes.c_double(0.0)
-        meanG.GetPoint(0,x,mean)
-        sigma = ctypes.c_double(0.0)
-        sigmaG.GetPoint(0,x,sigma)
-        alpha_one = ctypes.c_double(0.0)
-        alpha_oneG.GetPoint(0, x, alpha_one)
-        alpha_two = ctypes.c_double(0.0)
-        alpha_twoG.GetPoint(0, x, alpha_two)
-        sign_one = ctypes.c_double(0.0)
-        sign_oneG.GetPoint(0,x,sign_one)
-        sign_two = ctypes.c_double(0.0)
-        sign_twoG.GetPoint(0,x,sign_two)
+        mean = params['mean']
+        sigma = params['sigma']
 
         if(xmin > 0. and xmax > 0.): #account for rescaling
             mean = (mean - xmin)/(xmax - xmin)
@@ -233,19 +219,19 @@ class DataCardMaker:
         self.w.factory("expr::{name}('{param}*(1+{vv_syst})',{vv_systs},{param})".format(name=sigmaVar,param=sigmaRaw,vv_syst=resolutionStr,vv_systs=','.join(resolutionSysts)))
 
         alphaOneVar = "_".join(["ALPHAONE", name, self.tag])        
-        alpha_one = ROOT.RooRealVar(alphaOneVar,alphaOneVar,alpha_one)
+        alpha_one = ROOT.RooRealVar(alphaOneVar,alphaOneVar,params['alpha'])
         getattr(self.w, 'import')(alpha_one)
 
         alphaTwoVar = "_".join(["ALPHATWO", name, self.tag])        
-        alpha_two = ROOT.RooRealVar(alphaTwoVar, alphaTwoVar, alpha_two)
+        alpha_two = ROOT.RooRealVar(alphaTwoVar, alphaTwoVar, params['alpha2'])
         getattr(self.w, 'import')(alpha_two)
         
         signOneVar = "_".join(["SIGNONE", name, self.tag])
-        sign_one = ROOT.RooRealVar(signOneVar, signOneVar, sign_one)    
+        sign_one = ROOT.RooRealVar(signOneVar, signOneVar, params['sign'])    
         getattr(self.w, 'import')(sign_one)
         
         signTwoVar = "_".join(["SIGNTWO", name, self.tag])
-        sign_two = ROOT.RooRealVar(signTwoVar, signTwoVar, sign_two)    
+        sign_two = ROOT.RooRealVar(signTwoVar, signTwoVar, params['sign2'])    
         getattr(self.w, 'import')(sign_two)
         
         #dcbFunc = "_".join(["dcb", name, self.tag])
@@ -262,6 +248,10 @@ class DataCardMaker:
     def addSignalShape(self,name,jsonFile,scale ={},resolution={}, xmin=-1.0, xmax = -1.0):
     
         pdfName="_".join([name,self.tag])
+
+        with open(jsonFile, 'r') as f:
+            params = json.load(f)
+
     
         #self.w.factory("MH[3000]")
         #self.w.var("MH").setConstant(1)

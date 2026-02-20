@@ -4,107 +4,67 @@ import os
 from Utils import *
 from Fitter import Fitter
 
-def fit_signalmodel(input_file, sig_file_name, mass, x_bins, fine_bins,
-                    plot_dir, return_fit=False, dcb_model=False, fit_range = 0.2, plot_label =""):
-
-    fine_bin_size = 0.2
-    bins_fine = int((x_bins[-1]-x_bins[0])/fine_bin_size)
+def fit_signalmodel(input_file, sig_file_name, mass, x_bins,
+                    plot_dir, dcb_model=False, fit_range = 0.2, plot_label =""):
 
     mlow = (1.0 - fit_range) * mass
     mhigh = (1.0 + fit_range) * mass
 
     bins_sig_fit = array(
-        'f', truncate(
-             [x_bins[0] + ib*fine_bin_size for ib in range(bins_fine + 1)],
-             mlow, mhigh)
-        )
+        'f', truncate( x_bins, mlow, mhigh))
 
-    large_bins_sig_fit = array('f', truncate(x_bins, mlow, mhigh))
-    roobins_sig_fit = ROOT.RooBinning(len(large_bins_sig_fit) - 1,
-                                      array('d', large_bins_sig_fit),
-                                      "mbins_sig")
 
     histos_sig = ROOT.TH1F("m_sig", "m_sig",
                            len(bins_sig_fit) - 1, bins_sig_fit)
 
     load_h5_sb(input_file, histos_sig)
-    sig_outfile = ROOT.TFile(sig_file_name, "RECREATE")
+    histos_sig.Print("range")
+
     fitter = Fitter(['m_fine'])
 
-    if dcb_model:
-        fitter.signalDCB('model_s', "m_fine", mass)
-    else:
-        fitter.signalResonance('model_s', "m_fine", mass)
+    fitter.signalShape('model_s', "m_fine", mass, options.sig_shape)
 
     fitter.w.var("MH").setVal(mass)
-    fitter.importBinnedData(histos_sig, ['m_fine'], 'data')
+    fitter.importBinnedData(histos_sig, 'm_fine', 'data')
     fres = fitter.fit('model_s', 'data', [ROOT.RooFit.Save(1)])
+
     if fres:
-        fname = sig_file_name.replace('.root', '.txt')
+        fname = sig_file_name.replace('.json', '.txt')
         with open(fname, 'w') as f:
             f.write('%d\n' % fres.status())
     m_fine = fitter.getVar('m_fine')
     m_fine.setBins(len(bins_sig_fit))
 
-    chi2_fine, ndof = fitter.projection("model_s", "data", "m_fine",
+    chi2, ndof = fitter.projection("model_s", "data", "m_fine",
                                   plot_dir + plot_label + "signal_fit.png")
 
     fitter.projection("model_s", "data", "m_fine",
-                      plot_dir + plot_label +  "signal_fit_log.png", 0, True)
-
-    chi2, ndof = fitter.projection("model_s", "data", "m_fine",
-                             plot_dir + plot_label + "signal_fit_binned.png",
-                             roobins_sig_fit)
-
-    fitter.projection("model_s", "data", "m_fine",
-                      plot_dir + plot_label + "signal_fit_log_binned.png",
-                      roobins_sig_fit, logy=True)
+                      plot_dir + plot_label +  "signal_fit_log.png", logy=True)
 
     print("Fit done")
-    sig_outfile.cd()
-    histos_sig.Write()
-    print("cd, write")
-
-    if dcb_model:
-        graphs = {'mean': ROOT.TGraphErrors(),
-                  'sigma': ROOT.TGraphErrors(),
-                  'alpha': ROOT.TGraphErrors(),
-                  'alpha2': ROOT.TGraphErrors(),
-                  'sign': ROOT.TGraphErrors(),
-                  'sign2': ROOT.TGraphErrors()}
-    else:
-        graphs = {'mean': ROOT.TGraphErrors(),
-                  'sigma': ROOT.TGraphErrors(),
-                  'alpha': ROOT.TGraphErrors(),
-                  'sign': ROOT.TGraphErrors(),
-                  'scalesigma': ROOT.TGraphErrors(),
-                  'sigfrac': ROOT.TGraphErrors()}
-
-    for var, graph in graphs.items():
-        value, error = fitter.fetch(var)
-        graph.SetPoint(0, mass, value)
-        graph.SetPointError(0, 0.0, error)
-
-    sig_outfile.cd()
-    for name, graph in graphs.items():
-        graph.Write(name)
-        graph.Print()
-
-    sig_outfile.Close()
 
     print (
         """
         #############################
-        signal fit chi2 (fine binning), %.3f
-        signal fit chi2 (large binning), %.3f
-        #############################
-        """ % (chi2_fine, chi2)
+        signal fit chi2 / ndof: %.3f / %.3f =   %.3f
+        """ % (chi2, ndof, chi2/ndof)
         )
 
-    if return_fit:
-        return fitter
-    else:
-        return None
+    params = {}
+    for par in fitter.sig_shape_params:
+        value, error = fitter.fetch(par)
+        params[par] = value
+        params[par + "-err"] = error
+
+    params['mass'] = mass
+    print("Results:")
+    print(params)
+
+    with open(sig_file_name, 'w') as f:
+        json.dump(params, f, indent=4)
+
+
+    return fitter
 
 
 
@@ -115,72 +75,38 @@ def fit_signals(options):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    fine_bin_size = 0.2
     masses = options.masses
 
-    binsx = list(np.arange(11, 40, 0.2))
+    binsx = list(np.arange(options.m_min, options.m_max + options.bin_size, options.bin_size))
 
     # round to smallest precision we are storing mass values with, otherwise
     # get weird effects related to bin size
     #roundTo(binsx, fine_bin_size)
-    bins_fine = int((binsx[-1]-binsx[0])/fine_bin_size)
-
-    if options.dcbModel:
-        full_graphs = {'mean': ROOT.TGraphErrors(),
-                       'sigma': ROOT.TGraphErrors(),
-                       'alpha': ROOT.TGraphErrors(),
-                       'alpha2': ROOT.TGraphErrors(),
-                       'sign': ROOT.TGraphErrors(),
-                       'sign2': ROOT.TGraphErrors()}
-    else:
-        full_graphs = {'mean': ROOT.TGraphErrors(),
-                       'sigma': ROOT.TGraphErrors(),
-                       'alpha': ROOT.TGraphErrors(),
-                       'sign': ROOT.TGraphErrors(),
-                       'scalesigma': ROOT.TGraphErrors(),
-                       'sigfrac': ROOT.TGraphErrors()}
 
     for i, mass in enumerate(masses):
         print("########## FIT SIGNAL %.2f AND SAVE PARAMETERS ############" % mass)
-        sig_file_name = os.path.join(out_dir, "sig_fit_{}.root".format(mass))
+        sig_file_name = os.path.join(out_dir, "sig_fit_{}.json".format(mass))
         plot_label = "M%i_" % mass
         current_fit = fit_signalmodel(options.inputFiles[i], sig_file_name,
-                                      mass, binsx, bins_fine, out_dir + "/",
-                                      return_fit=True, dcb_model=options.dcbModel, 
+                                      mass, binsx, out_dir + "/",
+                                      dcb_model=options.dcbModel, 
                                       fit_range = options.fitRange, plot_label = plot_label)
 
-        print("return")
-        parameters = dict()
-        print(i, mass)
-        for var, graph in full_graphs.items():
-            val, err = current_fit.fetch(var)
-            parameters[var] = val
-            parameters['%s-err' % var] = err
-            graph.SetPoint(i, mass, val)
-            graph.SetPointError(i, 0.0, err)
-            graph.Print()
-
-        #parameters["script_options"] = vars(options)
-        #sig_file_name = os.path.join(out_dir, "sig_fit_{}.json".format(mass))
-        #with open(sig_file_name, 'w') as f:
-        #    json.dump(parameters, f, indent=4)
-
     print("Done with loop!")
-
-    full_file_name = os.path.join(out_dir, "full_fit.root")
-    full_outfile = ROOT.TFile(full_file_name, "RECREATE")
-    full_outfile.cd()
-
-    for name, graph in full_graphs.items():
-        graph.Write(name)
-
-    full_outfile.Close()
-    print("Done!")
     return
 
 
 def fitting_options():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--m-min", type=float, default=11.0,
+                      help="Minimum m for the fit")
+    parser.add_argument("--m-max", type=float, default=40.0,
+                      help="Maximum m for the fit")
+    parser.add_argument("--bin-size", type=float, default=0.2,
+                      help="Size of bins")
+    parser.add_argument("--sig-shape", default='DCB', 
+            help="Functional form for signal shape. Options: gaus, CB, CBgaus, DCB")
+
     parser.add_argument("-M", "-M", dest="masses", type=int, nargs="+",
                         help="List of injected signal masses")
     parser.add_argument("-i", "--inputFiles", dest="inputFiles", nargs="+",
@@ -191,7 +117,7 @@ def fitting_options():
     parser.add_argument("--dcb-model", "--dcbModel", dest="dcbModel", action="store_true",
                         default=False,
                         help="Whether or not to use double crystal ball model")
-    parser.add_argument("--fitRange", dest="fitRange", type = float, default=0.1,
+    parser.add_argument("--fitRange", dest="fitRange", type = float, default=0.2,
                         help="What mass range to perform fit to signal shape over (in terms of frac. of signal mass)")
     return parser
 
