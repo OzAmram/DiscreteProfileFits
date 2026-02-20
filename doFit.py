@@ -4,11 +4,13 @@ import json
 import random
 import optparse
 import math
+import types
 from Fitter import Fitter, shape_map
 from DataCardMaker import DataCardMaker
 from Utils import *
 from array import array
 from fit_signalshapes import  fit_signalmodel
+from makePostfitPlot import make_postfit_plot
 
 def dofit(options):
 
@@ -24,47 +26,24 @@ def dofit(options):
         #remove old results
         os.system("rm %s" % plot_dir + "fit_results_{}.json".format(options.mass))
 
-    fine_bin_size = 0.1
     mass = options.mass 
-    binsx = list(np.arange(options.m_min, options.m_max + options.bin_size, options.bin_size))
+    binsx = list(np.arange(options.m_min, options.m_max, options.bin_size))
 
 
-    nbins_fine = int((binsx[-1] - binsx[0])/fine_bin_size)
-    print('nbins_fine', nbins_fine)
-
-    #transform to 0 to 1 range
-    xmin, xmax = binsx[0], binsx[-1]
+    nbins_fine = int((options.m_max - options.m_min) / options.bin_size)
+    print('Num bins', nbins_fine)
 
     histos_sb = ROOT.TH1F("m_sb", "m_sb" ,nbins_fine, 0., 1.)
-    
-    
-    load_h5_sb(options.inputFile, histos_sb, xmin=xmin, xmax=xmax)
+
+    load_h5_sb(options.inputFile, histos_sb, xmin=options.m_min, xmax=options.m_max)
     print("************ Found %i total events \n" % histos_sb.GetEntries())
     print(histos_sb.Integral())
 
-    
+    if(not os.path.exists(options.sig_shape)):
+        print("Sig file %s doesn't exist" % options.sig_shape)
+        exit(1)
 
-    if(options.rebin):
-        bins_nonzero = get_rebinning(binsx, histos_sb)
-        print("Rebinning to avoid zero bins!")
-        print("old", binsx)
-        print("new", bins_nonzero)
-        bins = bins_nonzero
-    else:
-        bins = binsx
-
-    if(options.refit_sig):
-        print ("########## FIT SIGNAL AND SAVE PARAMETERS ############")
-        sig_file_name = "sig_fit.root"
-
-        fit_signalmodel(options.inputFile, sig_file_name, mass, binsx, nbins_fine, plot_dir,return_fit=False,
-                        dcb_model=options.dcb_model)
-
-    else:  # use precomputed signal shape
-        if(not os.path.exists(options.sig_shape)):
-            print("Sig file %s doesn't exist" % options.sig_shape)
-            exit(1)
-        sig_file_name = options.sig_shape
+    sig_file_name = options.sig_shape
 
     sb_fname = plot_dir + "sb_fit.root"
     sb_outfile = ROOT.TFile(sb_fname, 'RECREATE')
@@ -84,11 +63,11 @@ def dofit(options):
     if options.dcb_model:
         card.addDCBSignalShape('model_signal_m', sig_file_name,
                                {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0}, 
-                               xmin=xmin, xmax=xmax)
+                               xmin=options.m_min, xmax=options.m_max)
     else:
         card.addSignalShape('model_signal_m',  sig_file_name,
                             {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0},
-                            xmin=xmin, xmax=xmax)
+                            xmin=options.m_min, xmax=options.m_max)
 
 
     sig_norm = card.addFixedYieldFromFile('model_signal_m', 0, sig_file_name,
@@ -99,9 +78,6 @@ def dofit(options):
     if options.blinded:
         print("BLIND FIT TO DO ")
         exit(1)
-
-    # Normalized bin edges in 0-1 space (workspace variable range) — used for post-fit plot
-    bins_norm = [(b - xmin) / (xmax - xmin) for b in binsx]
 
     fitting_histogram = histos_sb
     data_name = "data_bkg"
@@ -300,9 +276,30 @@ def dofit(options):
     results['script_options'] = vars(options)
 
     print("Saving fit results to %s" % plot_dir + "fit_results_{}.json".format(options.mass))
-        
+
     with open(plot_dir + "fit_results_{}.json".format(options.mass), "w") as jsonfile:
         json.dump(results, jsonfile, indent=4)
+
+    # Postfit signal + background plot
+    postfit_opt = types.SimpleNamespace(
+        inputWSFile = plot_dir + "datacardInputs_mass_%s.root" % fit_label,
+        fitDiagFile = f_diagnostics_name,
+        cat         = "mass_%s" % fit_label,
+        mass        = options.mass,
+        mMin        = options.m_min,
+        mMax        = options.m_max,
+        nBins       = nbins_fine,
+        pdfNBins    = 600,
+        sigNorm     = options.sig_norm,
+        poiName     = poi_name,
+        outDir      = plot_dir,
+        ext         = "",
+        lumi        = "",
+        sqrts       = "13.6",
+        drawSignal  = True,
+        jsonFile    = plot_dir + "fit_results_{}.json".format(options.mass),
+    )
+    make_postfit_plot(postfit_opt)
 
     return results
 
