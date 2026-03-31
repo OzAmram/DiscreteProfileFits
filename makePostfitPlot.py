@@ -83,6 +83,9 @@ def get_options():
         "--noSignal", dest="drawSignal", action="store_false", default=True,
         help="Suppress the signal curve on the plot")
     parser.add_option(
+        "--bkgOnly", dest="bkgOnly", action="store_true", default=False,
+        help="Use background-only fit (fit_b) instead of S+B fit (fit_s)")
+    parser.add_option(
         "--jsonFile", dest="jsonFile", default="",
         help="Json file to store results in (optional)")
     return parser.parse_args()
@@ -119,9 +122,12 @@ def make_postfit_plot(opt):
     ----------
     opt : namespace / object with attributes matching the command-line options
           (inputWSFile, fitDiagFile, cat, mass, mMin, mMax, nBins, pdfNBins,
-           sigNorm, poiName, outDir, ext, lumi, sqrts, drawSignal, jsonFile)
+           sigNorm, poiName, outDir, ext, lumi, sqrts, drawSignal, bkgOnly,
+           jsonFile)
     """
-    print(opt.__dict__)
+    bkg_only = getattr(opt, "bkgOnly", False)
+    if bkg_only:
+        opt.drawSignal = False
 
     # ---------------------------------------------------------------------------
     # Physical mass parameters
@@ -199,32 +205,38 @@ def make_postfit_plot(opt):
 
 
     # ---------------------------------------------------------------------------
-    # 2.  Read postfit parameter values from FitDiagnostics tree_fit_sb
+    # 2.  Read postfit parameter values from FitDiagnostics
+    #     S+B fit: tree_fit_sb / fit_s   |   bkg-only fit: tree_fit_b / fit_b
     # ---------------------------------------------------------------------------
-    r_fit       = 0.0
+    r_fit        = 0.0
     pdfindex_fit = pdfindex_initial
 
-    print(" --> Reading postfit values from: %s" % opt.fitDiagFile)
+    tree_name   = "tree_fit_b"  if bkg_only else "tree_fit_sb"
+    fitres_name = "fit_b"       if bkg_only else "fit_s"
+    fit_label   = "bkg-only"    if bkg_only else "S+B"
+
+    print(" --> Reading %s postfit values from: %s" % (fit_label, opt.fitDiagFile))
     if not os.path.exists(opt.fitDiagFile):
         print("   WARNING: fitDiagnostics file not found; using pre-fit workspace values")
     else:
-        f_diag = ROOT.TFile(opt.fitDiagFile)
-        tree_fit_sb = f_diag.Get("tree_fit_sb")
+        f_diag    = ROOT.TFile(opt.fitDiagFile)
+        fit_tree  = f_diag.Get(tree_name)
 
-        if tree_fit_sb and tree_fit_sb.GetEntries() > 0:
-            tree_fit_sb.GetEntry(0)
-            r_fit = float(tree_fit_sb.r)
-            print("   Postfit signal strength  r = %.4f" % r_fit)
+        if fit_tree and fit_tree.GetEntries() > 0:
+            fit_tree.GetEntry(0)
+            if not bkg_only:
+                r_fit = float(fit_tree.r)
+                print("   Postfit signal strength  r = %.4f" % r_fit)
 
-            # Use fit_s RooFitResult to set ALL floating parameters (including
+            # Use the RooFitResult to set ALL floating parameters (including
             # background shape parameters like bern_p0, exp_p0, etc.).
-            # tree_fit_sb only stores explicit datacard nuisances, so background
-            # shape parameters -- which are freely floating workspace variables but
-            # not declared as flatParam/param in the datacard -- are missing from
-            # the tree and would silently keep their pre-fit workspace values.
-            fit_s = f_diag.Get("fit_s")
-            if fit_s:
-                final_pars = fit_s.floatParsFinal()
+            # The TTree only stores explicit datacard nuisances, so background
+            # shape parameters -- freely floating workspace variables not
+            # declared as flatParam/param -- are missing from the tree and
+            # would silently keep their pre-fit workspace values.
+            fit_result = f_diag.Get(fitres_name)
+            if fit_result:
+                final_pars = fit_result.floatParsFinal()
                 par_iter   = final_pars.createIterator()
                 par = par_iter.Next()
                 n_set = 0
@@ -234,18 +246,18 @@ def make_postfit_plot(opt):
                         wvar.setVal(par.getVal())
                         n_set += 1
                     par = par_iter.Next()
-                print("   Set %d postfit parameters from fit_s RooFitResult" % n_set)
+                print("   Set %d postfit parameters from %s RooFitResult" % (n_set, fitres_name))
             else:
                 # Fallback: iterate workspace vars and match to tree leaves.
                 # This will miss freely-floating background shape parameters.
-                print("   WARNING: fit_s not found in fitDiagnostics; "
-                      "background shape parameters may use pre-fit values")
+                print("   WARNING: %s not found in fitDiagnostics; "
+                      "background shape parameters may use pre-fit values" % fitres_name)
                 all_vars  = w.allVars()
                 var_iter  = all_vars.createIterator()
                 v = var_iter.Next()
                 while v:
                     vname = v.GetName()
-                    leaf  = tree_fit_sb.GetLeaf(vname)
+                    leaf  = fit_tree.GetLeaf(vname)
                     if leaf and not v.isConstant():
                         v.setVal(leaf.GetValue())
                     v = var_iter.Next()
@@ -255,7 +267,7 @@ def make_postfit_plot(opt):
                 bkg_norm_fit = bkg_norm_var.getVal()
 
             # Update pdf index from tree (the discrete cat is stored as an int branch)
-            leaf_idx = tree_fit_sb.GetLeaf("pdf_index")
+            leaf_idx = fit_tree.GetLeaf("pdf_index")
             if leaf_idx:
                 pdfindex_fit = int(leaf_idx.GetValue())
                 if pdf_index_cat:
@@ -264,7 +276,7 @@ def make_postfit_plot(opt):
             f_diag.Close()
 
         else:
-            print("   WARNING: tree_fit_sb empty; using pre-fit workspace values")
+            print("   WARNING: %s empty; using pre-fit workspace values" % tree_name)
             r_fit = 0.0
 
     print("   Background norm (postfit) = %.1f events" % bkg_norm_fit)
@@ -377,24 +389,27 @@ def make_postfit_plot(opt):
 
 
     # ---------------------------------------------------------------------------
-    # 5.  Chi2 / ndof and p-value  (signal + best-fit background vs data)
+    # 5.  Chi2 / ndof and p-value
+    #     S+B mode:      chi2 vs (background + signal), ndof includes r
+    #     bkg-only mode: chi2 vs background only,       ndof excludes r
     # ---------------------------------------------------------------------------
     chi2_val    = 0.0
     n_bins_chi2 = 0
     for ibin in range(1, opt.nBins + 1):
-        d  = hists["data"].GetBinContent(ibin)
-        b  = h_bkg_bf_coarse.GetBinContent(ibin)
-        s  = hists["signal_nBins"].GetBinContent(ibin) if "signal_nBins" in hists else 0.0
-        sb = b + s
-        if sb > 0:
-            chi2_val    += (d - sb) ** 2 / sb
+        d    = hists["data"].GetBinContent(ibin)
+        b    = h_bkg_bf_coarse.GetBinContent(ibin)
+        s    = (hists["signal_nBins"].GetBinContent(ibin)
+                if "signal_nBins" in hists else 0.0)
+        exp  = b if bkg_only else b + s
+        if exp > 0:
+            chi2_val    += (d - exp) ** 2 / exp
             n_bins_chi2 += 1
 
-    # Free parameters: bkg shape + bkg norm + signal strength r (if signal present)
+    # Free parameters: bkg shape + bkg norm [+ signal strength r for S+B]
     bkg_par_set  = bpdfs[bpdf_bf_name].getParameters(ROOT.RooArgSet(m))
     n_free_shape = bkg_par_set.selectByAttrib("Constant", False).getSize()
     n_free_total = n_free_shape + 1                           # +1 for multi_pdf_norm
-    if "signal_nBins" in hists:
+    if not bkg_only and "signal_nBins" in hists:
         n_free_total += 1                                     # +1 for signal strength r
     ndof         = n_bins_chi2 - n_free_total
     chi2_prob    = ROOT.TMath.Prob(chi2_val, ndof) if ndof > 0 else -1.0
@@ -635,8 +650,10 @@ def make_postfit_plot(opt):
     if not os.path.isdir(opt.outDir):
         os.makedirs(opt.outDir)
 
+    bkg_only_str = "_bkgOnly" if bkg_only else ""
     ext_str  = ("_" + opt.ext) if opt.ext else ""
-    out_base = os.path.join(opt.outDir, "postfit_multipdf_%s%s" % (opt.cat, ext_str))
+    out_base = os.path.join(
+        opt.outDir, "postfit_multipdf_%s%s%s" % (opt.cat, bkg_only_str, ext_str))
 
     canv.SaveAs(out_base + ".pdf")
     canv.SaveAs(out_base + ".png")
@@ -653,9 +670,10 @@ def make_postfit_plot(opt):
         with open(opt.jsonFile, 'r') as f:
             results = json.load(f)
 
-        results['sbfit_chi2'] = chi2_val
-        results['sbfit_ndof'] = ndof
-        results['sbfit_prob'] = chi2_prob
+        prefix = 'bkgfit' if bkg_only else 'sbfit'
+        results[prefix + '_chi2'] = chi2_val
+        results[prefix + '_ndof'] = ndof
+        results[prefix + '_prob'] = chi2_prob
 
         with open(opt.jsonFile, 'w') as f:
             json.dump(results, f, indent=4)

@@ -301,6 +301,12 @@ def dofit(options):
     )
     make_postfit_plot(postfit_opt)
 
+    # Background-only postfit plot
+    postfit_opt_bkg = types.SimpleNamespace(**vars(postfit_opt))
+    postfit_opt_bkg.bkgOnly    = True
+    postfit_opt_bkg.drawSignal = False
+    make_postfit_plot(postfit_opt_bkg)
+
     return results
 
 
