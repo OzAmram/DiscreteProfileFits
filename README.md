@@ -50,6 +50,5 @@ This signal shape can then be used to perform the signal + background fit as:
 The fit results and plots get saved in `fit_test`. 
 
 TODO:
-- Signal + background fit plots
-- Rescale x-axis on plots to reflect true mass values not 0 to 1
 - More functional forms
+- Config file for each fit? 
