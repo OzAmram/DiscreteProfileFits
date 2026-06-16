@@ -30,7 +30,7 @@ You can then clone this repo somewhere inside the `src/` directory of the CMSSW 
 
 The input files containing masses to be fit should be h5 files with a single field called `masses`. 
 
-Signal shapes are stored in `.root` files (for now), obtained with the `fit_signalshapes.py` script. 
+Signal shapes are stored in `.json` files, obtained with the `fit_signalshapes.py` script. 
 
 ## Running the fit:
 
