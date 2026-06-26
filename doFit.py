@@ -83,9 +83,12 @@ def dofit(options):
     data_name = "data_bkg"
 
     func_forms = {
+            #"bernPower": [2, 3, 4, 5], 
+            "bern": [2, 3, 4, 5, 6], 
+            "polyExp": [1, 2, 3],
             "exp": [1, 2, 3, 4],
-            "bern": [2, 3, 4, 5], 
             }
+    final_func_forms = dict()
     for func_form, orderToTry in func_forms.items():
         print("\n \n Fitting with functional form %s " % func_form)
 
@@ -108,15 +111,12 @@ def dofit(options):
             fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
             
             fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
-            #Running fit two times sometimes seems to improve things sometimes (better initial guesses for params)
-            #fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
             chi2_fine, ndof_fine = fitter_bkg.projection(
                 model=model_name, data=data_name, poi="m_fine",
                 filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False)
 
             chi2_prob = ROOT.TMath.Prob(chi2_fine, ndof_fine)
-
 
             bkg_fit_params = dict()
             for parName in fitter_bkg.par_names:
@@ -129,6 +129,7 @@ def dofit(options):
 
             with open(bkg_fnames[i], "w") as jsonfile:
                 json.dump(bkg_fit_params, jsonfile, indent=4)
+
 
             print("#############################")
             print("Order %i results: " % order)
@@ -147,9 +148,15 @@ def dofit(options):
         best_order = orderToTry[best_i]
         print("\n Chose order %i based on F-test ! \n" % best_order)
 
-        #Add this functional form to workspace of the final fit
+        #save func and order
+        final_func_forms[func_form] = best_i
+
+        #Add this functional form to workspace of the final fit,
+        # seeding with the Fitter's best-fit values so combine starts from a
+        # good initial point for every pdf_index (not just the selected one).
         shape_builder = shape_map[func_form]
-        bkg_model,_,bkg_pars = shape_builder(func_form, card.poi, order=best_order)
+        bkg_model,_,bkg_pars = shape_builder(func_form, card.poi, order=best_order,
+                                              start_vals=fit_params[best_i])
 
         card.bkg_shapes.append(bkg_model)
         card.bkg_pars.extend(bkg_pars)
@@ -261,6 +268,8 @@ def dofit(options):
     results['asimov_signif'] = exp_signif
     results['asimov_pval'] = exp_pval
     results['pval'] = pval
+    results['func_forms'] = func_forms
+    results['final_func_forms'] = final_func_forms
     results['obs_excess_events'] = sig_strength*sig_norm
     results['obs_excess_events_unc'] = sig_strength_unc*sig_norm
     results['obs_lim_events'] = obs_limit*sig_norm

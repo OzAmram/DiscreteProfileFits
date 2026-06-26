@@ -23,6 +23,7 @@ from optparse import OptionParser
 from collections import OrderedDict as od
 
 import ROOT
+import CMS_lumi
 
 ROOT.gROOT.SetBatch(True)
 ROOT.gStyle.SetOptStat(0)
@@ -95,13 +96,18 @@ def get_options():
 # Function name for legend from PDF object name
 # ---------------------------------------------------------------------------
 def pdf_legend_label(pname, is_best_fit):
-    if "bern" in pname.lower():
+    plow = pname.lower()
+    if "bernpower" in plow:
+        fname = "Bern. + power law"
+    elif "polyexp" in plow:
+        fname = "Poly. #times exp."
+    elif "bern" in plow:
         fname = "Bern. poly"
-    elif "exp" in pname.lower():
+    elif "exp" in plow:
         fname = "Sum of exp."
-    elif "pow" in pname.lower():
+    elif "pow" in plow:
         fname = "Power law"
-    elif "lau" in pname.lower():
+    elif "lau" in plow:
         fname = "Laurent series"
     else:
         fname = pname
@@ -185,13 +191,6 @@ def make_postfit_plot(opt):
         print("ERROR: 'multi_pdf' not found in workspace")
         sys.exit(1)
 
-    pdf_index_cat = w.cat("pdf_index")
-    if not pdf_index_cat:
-        # fallback name used by older DataCardMaker versions
-        pdf_index_cat = w.cat("pdf_index_mass_mumu")
-
-    pdfindex_initial = pdf_index_cat.getIndex() if pdf_index_cat else 0
-
     # Background normalization
     bkg_norm_var = w.var("multi_pdf_norm")
     bkg_norm_fit = bkg_norm_var.getVal() if bkg_norm_var else data.sumEntries()
@@ -209,7 +208,6 @@ def make_postfit_plot(opt):
     #     S+B fit: tree_fit_sb / fit_s   |   bkg-only fit: tree_fit_b / fit_b
     # ---------------------------------------------------------------------------
     r_fit        = 0.0
-    pdfindex_fit = pdfindex_initial
 
     tree_name   = "tree_fit_b"  if bkg_only else "tree_fit_sb"
     fitres_name = "fit_b"       if bkg_only else "fit_s"
@@ -266,13 +264,6 @@ def make_postfit_plot(opt):
             if bkg_norm_var:
                 bkg_norm_fit = bkg_norm_var.getVal()
 
-            # Update pdf index from tree (the discrete cat is stored as an int branch)
-            leaf_idx = fit_tree.GetLeaf("pdf_index")
-            if leaf_idx:
-                pdfindex_fit = int(leaf_idx.GetValue())
-                if pdf_index_cat:
-                    pdf_index_cat.setIndex(pdfindex_fit)
-
             f_diag.Close()
 
         else:
@@ -280,7 +271,6 @@ def make_postfit_plot(opt):
             r_fit = 0.0
 
     print("   Background norm (postfit) = %.1f events" % bkg_norm_fit)
-    print("   Best-fit pdf index        = %d"           % pdfindex_fit)
     sig_events = r_fit * opt.sigNorm
     print("   Signal events (r*norm)    = %.1f"         % sig_events)
 
@@ -292,23 +282,19 @@ def make_postfit_plot(opt):
     print("\n --> MultiPdf contains %d component PDFs" % n_pdfs)
 
     bpdfs         = od()   # ordered dict: name -> pdf object
-    bpdf_bf_name  = None
 
     for ipdf in range(n_pdfs):
         pdf   = multipdf.getPdf(ipdf)
         pname = pdf.GetName()
         bpdfs[pname] = pdf
         print("   [%d] %s" % (ipdf, pname))
-        if ipdf == pdfindex_fit:
-            bpdf_bf_name = pname
-
-    if bpdf_bf_name is None:
-        bpdf_bf_name = list(bpdfs.keys())[0]
-    print("   Best-fit PDF: %s" % bpdf_bf_name)
 
     hists = od()
 
-    # Fine-binned PDF histograms (smooth curves) and coarse-binned (for ratio)
+    # Fine-binned PDF histograms (smooth curves) and coarse-binned for all PDFs.
+    # combine does not persist pdf_index post-fit (not in tree_fit_sb/tree_fit_b
+    # or the RooFitResult), so we build coarse histograms for every PDF and
+    # determine the best-fit one via chi2 scan after filling the data histogram.
     for pname, bpdf in bpdfs.items():
 
         # Fine-binned: for smooth curve in the upper pad
@@ -318,14 +304,12 @@ def make_postfit_plot(opt):
         h_fine_norm.Scale(bkg_norm_fit * float(opt.pdfNBins) / float(opt.nBins))
         hists[pname] = norm_to_phys(h_fine_norm, "h_%s" % pname)
 
-        # Coarse-binned: only needed for the best-fit PDF to compute residuals
-        if pname == bpdf_bf_name:
-            h_coarse_norm = bpdf.createHistogram(
-                "htmp_%s_coarse" % pname, m,
-                ROOT.RooFit.Binning(opt.nBins, 0., 1.))
-            h_coarse_norm.Scale(bkg_norm_fit)
-            hists["%s_nBins" % pname] = norm_to_phys(
-                h_coarse_norm, "h_%s_nBins" % pname)
+        h_coarse_norm = bpdf.createHistogram(
+            "htmp_%s_coarse" % pname, m,
+            ROOT.RooFit.Binning(opt.nBins, 0., 1.))
+        h_coarse_norm.Scale(bkg_norm_fit)
+        hists["%s_nBins" % pname] = norm_to_phys(
+            h_coarse_norm, "h_%s_nBins" % pname)
 
     # Data histogram
     h_data_norm = m.createHistogram("htmp_data", ROOT.RooFit.Binning(opt.nBins, 0., 1.))
@@ -333,6 +317,26 @@ def make_postfit_plot(opt):
     data.fillHistogram(h_data_norm, m_arglist)
     hists["data"] = norm_to_phys(h_data_norm, "h_data")
     hists["data"].SetBinErrorOption(ROOT.TH1.kPoisson)
+
+    # Determine best-fit PDF by chi2 scan against data.
+    # combine profiles over pdf_index during the fit and only floats the
+    # parameters for the selected pdf; the others stay at initial values.
+    # After loading postfit parameters the best-fit pdf has the smallest chi2.
+    best_chi2    = float('inf')
+    bpdf_bf_name = list(bpdfs.keys())[0]
+    for pname in bpdfs:
+        h_c = hists["%s_nBins" % pname]
+        c2  = 0.
+        for ibin in range(1, opt.nBins + 1):
+            d = hists["data"].GetBinContent(ibin)
+            b = h_c.GetBinContent(ibin)
+            if b > 0:
+                c2 += (d - b) ** 2 / b
+        print("   chi2 scan: %s -> %.1f" % (pname, c2))
+        if c2 < best_chi2:
+            best_chi2    = c2
+            bpdf_bf_name = pname
+    print("   Best-fit PDF (chi2 scan): %s" % bpdf_bf_name)
 
     # Signal histogram (fine-binned for drawing, coarse-binned for chi2)
     if opt.drawSignal and sig_pdf:
@@ -421,15 +425,16 @@ def make_postfit_plot(opt):
     # 6.  Canvas and pad setup  (matching reference script layout)
     # ---------------------------------------------------------------------------
     ROOT.TGaxis.SetMaxDigits(4)
-    ROOT.TGaxis.SetExponentOffset(-0.05, 0.00, "y")
+    ROOT.TGaxis.SetExponentOffset(-0.07, 0.00, "y")
 
     canv = ROOT.TCanvas("canv_%s" % opt.cat, "canv_%s" % opt.cat, 700, 700)
 
     pad1 = ROOT.TPad("pad1_%s" % opt.cat, "pad1_%s" % opt.cat, 0, 0.35, 1, 1)
     pad1.SetTickx()
     pad1.SetTicky()
+    pad1.SetTopMargin(0.08)
     pad1.SetBottomMargin(0.04)
-    pad1.SetLeftMargin(0.12)
+    pad1.SetLeftMargin(0.16)
     pad1.SetRightMargin(0.05)
     pad1.Draw()
 
@@ -438,7 +443,7 @@ def make_postfit_plot(opt):
     pad2.SetTicky()
     pad2.SetTopMargin(0.03)
     pad2.SetBottomMargin(0.30)
-    pad2.SetLeftMargin(0.12)
+    pad2.SetLeftMargin(0.16)
     pad2.SetRightMargin(0.05)
     pad2.Draw()
 
@@ -481,7 +486,7 @@ def make_postfit_plot(opt):
 
     # ---- Legends side-by-side in the upper headroom ----
     #leg of data + signal
-    leg0 = ROOT.TLegend(0.13, 0.60, 0.54, 0.8)
+    leg0 = ROOT.TLegend(0.17, 0.60, 0.54, 0.8)
     leg0.SetFillStyle(0)
     leg0.SetLineColor(0)
     leg0.SetTextSize(0.045)
@@ -537,37 +542,15 @@ def make_postfit_plot(opt):
         0.17, 0.54,
         "#chi^{2}/ndof = %.1f/%d  (p = %.2f)" % (chi2_val, ndof, chi2_prob))
 
-    # ---- CMS / lumi labels ----
-    lat_cms = ROOT.TLatex()
-    lat_cms.SetTextFont(61)
-    lat_cms.SetTextAlign(11)
-    lat_cms.SetNDC()
-    lat_cms.SetTextSize(0.075)
-    lat_cms.DrawLatex(0.14, 0.92, "CMS")
-
-    lat_prelim = ROOT.TLatex()
-    lat_prelim.SetTextFont(52)
-    lat_prelim.SetTextAlign(11)
-    lat_prelim.SetNDC()
-    lat_prelim.SetTextSize(0.058)
-    lat_prelim.DrawLatex(0.14, 0.83, "Preliminary")
-
+    # ---- CMS / lumi labels (via CMS_lumi.py) ----
     if opt.lumi:
-        lat_lumi = ROOT.TLatex()
-        lat_lumi.SetTextFont(42)
-        lat_lumi.SetTextAlign(31)
-        lat_lumi.SetNDC()
-        lat_lumi.SetTextSize(0.050)
-        lat_lumi.DrawLatex(
-            0.95, 0.92,
-            "%s (%s TeV)" % (opt.lumi, opt.sqrts))
+        CMS_lumi.lumi_sqrtS = "%s (%s TeV)" % (opt.lumi, opt.sqrts)
     elif opt.sqrts:
-        lat_lumi = ROOT.TLatex()
-        lat_lumi.SetTextFont(42)
-        lat_lumi.SetTextAlign(31)
-        lat_lumi.SetNDC()
-        lat_lumi.SetTextSize(0.050)
-        lat_lumi.DrawLatex(0.95, 0.92, "(%s TeV)" % opt.sqrts)
+        CMS_lumi.lumi_sqrtS = "(%s TeV)" % opt.sqrts
+    else:
+        CMS_lumi.lumi_sqrtS = ""
+    CMS_lumi.relPosX = 0.12   # push "Preliminary" clear of "CMS" text
+    CMS_lumi.CMS_lumi(pad1, 0, 0)  # iPeriod=0 → custom lumi_sqrtS; iPosX=0 → out of frame
 
 
     # ===========================================================================
@@ -589,7 +572,7 @@ def make_postfit_plot(opt):
     h_axes_ratio.SetTitle("")
     h_axes_ratio.GetXaxis().SetTitle(xaxis_title)
     h_axes_ratio.GetXaxis().SetTitleSize(0.08 * padSizeRatio)
-    h_axes_ratio.GetXaxis().SetTitleOffset(0.60)
+    h_axes_ratio.GetXaxis().SetTitleOffset(0.80)
     h_axes_ratio.GetXaxis().SetLabelSize(0.046 * padSizeRatio)
     h_axes_ratio.GetXaxis().SetLabelOffset(0.007)
     h_axes_ratio.GetXaxis().SetTickLength(0.03 * padSizeRatio)
@@ -671,9 +654,10 @@ def make_postfit_plot(opt):
             results = json.load(f)
 
         prefix = 'bkgfit' if bkg_only else 'sbfit'
-        results[prefix + '_chi2'] = chi2_val
-        results[prefix + '_ndof'] = ndof
-        results[prefix + '_prob'] = chi2_prob
+        results[prefix + '_chi2']    = chi2_val
+        results[prefix + '_ndof']    = ndof
+        results[prefix + '_prob']    = chi2_prob
+        results[prefix + '_best_pdf'] = bpdf_bf_name
 
         with open(opt.jsonFile, 'w') as f:
             json.dump(results, f, indent=4)

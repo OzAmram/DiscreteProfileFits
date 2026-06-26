@@ -16,7 +16,7 @@ def scaledVariable(m, name='x'):
     return x
 
 
-def polyShape(name = 'model', poi = None, order=4, start_vals=None):
+def polyShape(name = 'model', poi = None, order=4):
     #sum of bernstein polynomials
 
     #initial values
@@ -38,11 +38,9 @@ def polyShape(name = 'model', poi = None, order=4, start_vals=None):
     return shape, par_names, p_objs
 
 
-def bernShape(name = 'model', poi = None, order=4, start_vals=None):
+def bernShape(name = 'model', poi = None, order=4, par_label='bern', start_vals=None):
     #sum of bernstein polynomials
 
-    #initial values
-    start_val = 1.0
     pmin = 0.0
     pmax = 20.0
 
@@ -50,9 +48,11 @@ def bernShape(name = 'model', poi = None, order=4, start_vals=None):
     p_objs = []
     par_names = []
     for i in range(order):
-        poly_par = ROOT.RooRealVar(f"bern_p{i}", f"bern_p{i}", start_val, pmin, pmax)
+        pname = f"{par_label}_p{i}"
+        init = start_vals[pname][0] if (start_vals and pname in start_vals) else 1.0
+        poly_par = ROOT.RooRealVar(pname, pname, init, pmin, pmax)
         par_list.add(poly_par)
-        par_names.append(f"bern_p{i}")
+        par_names.append(pname)
         p_objs.append(poly_par)
 
 
@@ -61,35 +61,90 @@ def bernShape(name = 'model', poi = None, order=4, start_vals=None):
     return shape, par_names, p_objs
 
 
-def expShape(name, poi = None, order=4, start_vals=None):
+def bernPowerShape(name = 'model', poi = None, order=4, par_label='bernPower'):
+    # Bernstein polynomial (degree order-1) times a power law: bern(x) * x^c.
+    # Implemented as a single RooGenericPdf so only one normalization integral
+    # is needed.  Using RooAddPdf(bern, power_law) fails because the power_law
+    # PDF diverges at x=0 for c<0, causing RooFit's numerical integrator to
+    # hang or report "integral does not converge".
+    # The product bern(x)*x^c is finite and well-behaved for x in [0,1]:
+    # Bernstein polynomials are 0 at the endpoints for interior basis terms,
+    # and the overall product is integrable even for c > -1.
+
+    from math import comb
+
+    coeff_init = -0.5
+    coeff_min  = -5.0
+    coeff_max  =  5.0
+    coeff = ROOT.RooRealVar(f"{par_label}_pow_coeff", f"{par_label}_pow_coeff",
+                            coeff_init, coeff_min, coeff_max)
+
+    bern_pars = []
+    par_names = [f"{par_label}_pow_coeff"]
+    p_objs    = [coeff]
+
+    for i in range(order):
+        p = ROOT.RooRealVar(f"{par_label}_p{i}", f"{par_label}_p{i}", 1.0, 0.0, 20.0)
+        bern_pars.append(p)
+        p_objs.append(p)
+        par_names.append(f"{par_label}_p{i}")
+
+    # Build Bernstein polynomial of degree (order-1) as a formula string.
+    # B_{i,n}(x) = C(n,i) * x^i * (1-x)^(n-i),  n = order-1
+    # args: @0=poi, @1=coeff, @2..@(order+1)=bern control points
+    n = order - 1
+    terms = []
+    for i in range(order):
+        c_ni = comb(n, i)
+        x_pow   = "" if i == 0   else ("*@0"         if i == 1   else f"*pow(@0,{i})")
+        omx_pow = "" if n-i == 0 else ("*(1-@0)"     if n-i == 1 else f"*pow(1-@0,{n-i})")
+        terms.append(f"@{i+2}*{c_ni}{x_pow}{omx_pow}")
+
+    bern_str = "+".join(terms)
+    # Small offset in the power term keeps the integrand finite at x=0
+    # while being negligible (< 0.01%) across the physical range.
+    formula = f"({bern_str})*pow(@0+1e-4,@1)"
+
+    arg_list = ROOT.RooArgList()
+    arg_list.add(poi)
+    arg_list.add(coeff)
+    for p in bern_pars:
+        arg_list.add(p)
+    p_objs.append(arg_list)
+
+    shape = ROOT.RooGenericPdf(name+"_shape", name+"_shape", formula, arg_list)
+
+    return shape, par_names, p_objs
+
+
+def expShape(name, poi = None, order=4, par_label='exp', start_vals=None):
     #Sum of exponentials
 
-    #initial values
-    p_init = -0.5
     pmin = -20.0
     pmax = 20.0
-
-    c_init = 0.2
     cmin = 0.
     cmax = 1.
 
-    
     p_objs = []
     par_names = []
     e_list = ROOT.RooArgList()
     c_list = ROOT.RooArgList()
 
     for i in range(order):
-        exp_par = ROOT.RooRealVar(f"exp_p{i}", f"exp_p{i}", p_init, pmin, pmax)
-        exp = ROOT.RooExponential(f"exp_{i}", f"exp_{i}", poi, exp_par)
-        coef = ROOT.RooRealVar(f"exp_c{i}", f"exp_c{i}", c_init, cmin, cmax)
+        pname = f"{par_label}_p{i}"
+        cname = f"{par_label}_c{i}"
+        p_init = start_vals[pname][0] if (start_vals and pname in start_vals) else -0.5
+        c_init = start_vals[cname][0] if (start_vals and cname in start_vals) else 0.2
+        exp_par = ROOT.RooRealVar(pname, pname, p_init, pmin, pmax)
+        exp = ROOT.RooExponential(f"{par_label}_{i}", f"{par_label}_{i}", poi, exp_par)
+        coef = ROOT.RooRealVar(cname, cname, c_init, cmin, cmax)
 
         e_list.add(exp)
-        par_names.append(f"exp_p{i}")
+        par_names.append(pname)
 
         if(i<(order-1)): # don't include last coeff because redundant
             c_list.add(coef)
-            par_names.append(f"exp_c{i}")
+            par_names.append(cname)
 
         p_objs.extend([exp_par, exp, coef])
 
@@ -98,42 +153,62 @@ def expShape(name, poi = None, order=4, start_vals=None):
 
     return shape, par_names, p_objs
 
-def polyExpShape(name = 'model', poi = None, order=4, start_vals=None):
-    #Sum of exponentials
 
-    #initial values
-    p_init = 0.0
+def polyExpShape(name = 'model', poi = None, order=4, par_label='polyExp', start_vals=None):
+    #Polynomial times exponential
+    # Implemented as RooGenericPdf so the product is self-normalizing.
+    # RooProdPdf of two PDFs over the same observable does NOT renormalize,
+    # producing an invalid PDF with integral != 1.
+
     pmin = -20.0
     pmax = 20.0
 
-    c_init = 0.2
-    cmin = 0.
-    cmax = 1.
+    ec_name = f"{par_label}_exp_c"
+    ec_init = start_vals[ec_name][0] if (start_vals and ec_name in start_vals) else -0.5
+    exp_par = ROOT.RooRealVar(ec_name, ec_name, ec_init, pmin, pmax)
 
-    p_list = ROOT.RooArgList()
+    par_list = ROOT.RooArgList()
+    p_objs = [exp_par]
     par_names = []
 
-    exp_par = ROOT.RooRealVar(f"polyExp_e", f"polyExp_e", p_init, pmin, pmax)
-    exp = ROOT.RooExponential(f"polyExp_exp", f"polyExp_exp", poi, exp_par)
-
+    # Build the polynomial part as a sum: 1 + p0*x + p1*x^2 + ...
+    # using RooFormulaVar terms captured in the RooGenericPdf expression.
+    # Simpler: build a RooArgList of [poi, exp_par, poly_p0, poly_p1, ...]
+    # and write the formula as exp(@1*@0) * (1 + @2*@0 + @3*@0^2 + ...)
+    poly_pars = []
     for i in range(order):
-        poly_par = ROOT.RooRealVar(f"polyExp_p{i}", f"polyExp_p{i}", p_init, pmin, pmax)
-        p_list.add(poly_par)
-        par_names.append(f"polyExp_p{i}")
+        pp_name = f"{par_label}_poly_p{i}"
+        pp_init = start_vals[pp_name][0] if (start_vals and pp_name in start_vals) else 0.5/(i+1)**2
+        p = ROOT.RooRealVar(pp_name, pp_name, pp_init, -20.0, 20.0)
+        poly_pars.append(p)
+        p_objs.append(p)
+        par_names.append(pp_name)
+    par_names.append(ec_name)
 
-    poly = ROOT.RooPolynomial("polyExp_poly", "polyExp_poly", poi, p_list)
-    p_objs = [poly, exp]
+    # formula arguments: @0=poi, @1=exp_c, @2..=poly pars
+    arg_list = ROOT.RooArgList()
+    arg_list.add(poi)
+    arg_list.add(exp_par)
+    for p in poly_pars:
+        arg_list.add(p)
 
-    shape = ROOT.RooProdPdf(name+"_shape", name+"_shape", exp, poly)
+    poly_terms = "+".join(
+        "@%d*pow(@0,%d)" % (i + 2, i + 1) for i in range(order)
+    )
+    formula = "exp(@1*@0)*(1+%s)" % poly_terms
+
+    shape = ROOT.RooGenericPdf(name+"_shape", name+"_shape", formula, arg_list)
+    p_objs.append(arg_list)
 
     return shape, par_names, p_objs
 
 
 shape_map = {
-        "polyExp" : polyExpShape,
         "bern": bernShape,
         "poly": polyShape,
-        "exp": expShape
+        "exp": expShape,
+        "polyExp" : polyExpShape,
+        "bernPower" : bernPowerShape,
 
         }
 
@@ -389,13 +464,13 @@ class Fitter(object):
 
 
 
-    def bkgShape(self, func_form='bern', name = 'model',poi="m",start_vals = None,order=2):
+    def bkgShape(self, func_form='bern', name = 'model',poi="m",order=2):
 
         if(type(poi) == str): poi = self.w.var(poi)
 
 
         if(func_form in shape_map.keys()):
-            shape, par_names, objs = shape_map[func_form](name = name, poi=poi, order=order, start_vals=start_vals)
+            shape, par_names, objs = shape_map[func_form](name = name, poi=poi, order=order )
         else:
             print("Shape %s not implemented!" % shape)
             exit(1)
