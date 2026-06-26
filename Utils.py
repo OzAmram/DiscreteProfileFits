@@ -1,7 +1,7 @@
 import h5py, math, random
 from array import array
 import numpy as np
-import time, sys, os, optparse, json, copy
+import time, sys, os, optparse, json, copy, ctypes
 import copy
 
 import ROOT
@@ -13,12 +13,14 @@ ROOT.gROOT.SetBatch(True)
 ROOT.RooRandom.randomGenerator().SetSeed(random.randint(0, 1e+6))
 
 def get_nPars(order, func_form):
-    if(func_form == 'bern'):
+    if func_form == 'bern':
         return order
-    if(func_form == 'exp'):
+    if func_form == 'exp':
         return 2*order
-    if(func_form == 'polyExp'):
-        return order+1
+    if func_form == 'polyExp':
+        return order + 1
+    if func_form == 'bernPower':
+        return order + 1
 
 
 
@@ -73,10 +75,10 @@ def returnString(func,ftype):
             st=[]
             nnknots = func.GetNp()
             for i in range(0,nnknots):
-                x = ROOT.Double(0) 
-                y = ROOT.Double(0) 
-                func.GetKnot(i,x,y)
-                st.append([x,y])
+                x = ctypes.c_double(0)
+                y = ctypes.c_double(0)
+                func.GetKnot(i, x, y)
+                st.append([x.value, y.value])
             return st
         else:
             return ""

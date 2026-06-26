@@ -101,6 +101,8 @@ def pdf_legend_label(pname, is_best_fit):
         fname = "Bern. + power law"
     elif "polyexp" in plow:
         fname = "Poly. #times exp."
+    elif "exppoly" in plow:
+        fname = "Exp. polynomial"
     elif "bern" in plow:
         fname = "Bern. poly"
     elif "exp" in plow:

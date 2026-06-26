@@ -82,12 +82,7 @@ def dofit(options):
     fitting_histogram = histos_sb
     data_name = "data_bkg"
 
-    func_forms = {
-            #"bernPower": [2, 3, 4, 5], 
-            "bern": [2, 3, 4, 5, 6], 
-            "polyExp": [1, 2, 3],
-            "exp": [1, 2, 3, 4],
-            }
+    func_forms = options.func_forms
     final_func_forms = dict()
     for func_form, orderToTry in func_forms.items():
         print("\n \n Fitting with functional form %s " % func_form)
@@ -114,7 +109,8 @@ def dofit(options):
 
             chi2_fine, ndof_fine = fitter_bkg.projection(
                 model=model_name, data=data_name, poi="m_fine",
-                filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False)
+                filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False,
+                show_error=False)
 
             chi2_prob = ROOT.TMath.Prob(chi2_fine, ndof_fine)
 
@@ -303,8 +299,8 @@ def dofit(options):
         poiName     = poi_name,
         outDir      = plot_dir,
         ext         = "",
-        lumi        = "",
-        sqrts       = "13.6",
+        lumi        = options.lumi,
+        sqrts       = options.sqrts,
         drawSignal  = True,
         jsonFile    = plot_dir + "fit_results_{}.json".format(options.mass),
     )
@@ -321,6 +317,8 @@ def dofit(options):
 
 def fitting_options():
     parser = optparse.OptionParser()
+    parser.add_option("-c", "--config", dest="config", default=None,
+                      help="JSON config file; keys become defaults overrideable by CLI args")
     parser.add_option("-M", "-M", dest="mass", type=float, default=15.,
                       help="Signal mass hypothesis")
     parser.add_option("-i", "--inputFile", dest="inputFile",
@@ -364,12 +362,39 @@ def fitting_options():
                       default=False,
                       help="""Whether to use double crystal ball model for signal shape instead
                       of default model (gaussian core with single crystal ball)""")
-    parser.add_option("--sig_norm_unc", dest="sig_norm_unc", type=float, default= -1.0, help="Fractional uncertainty on signal normalization (for limits)")
+    parser.add_option("--sig_norm_unc", dest="sig_norm_unc", type=float, default=-1.0,
+                      help="Fractional uncertainty on signal normalization (for limits)")
+    parser.add_option("--lumi", dest="lumi", default="",
+                      help="Luminosity string for plot label, e.g. '27.0 fb^{-1}'")
+    parser.add_option("--sqrts", dest="sqrts", default="13.6",
+                      help="Centre-of-mass energy label (TeV)")
     return parser
 
 
+_DEFAULT_FUNC_FORMS = {
+    "bern":    [2, 3, 4, 5, 6],
+    "polyExp": [1, 2, 3],
+    "exp":     [1, 2, 3, 4],
+}
+
 if __name__ == "__main__":
     parser = fitting_options()
+
+    # First pass: find --config only (ignore unknown/positional args)
+    (pre_opts, _) = parser.parse_args()
+
+    func_forms = _DEFAULT_FUNC_FORMS.copy()
+    if pre_opts.config:
+        with open(pre_opts.config) as f:
+            cfg = json.load(f)
+        # func_forms is a structured dict — handle separately
+        func_forms = cfg.pop("func_forms", func_forms)
+        # Remaining flat keys become parser defaults; CLI args will override them
+        parser.set_defaults(**cfg)
+
+    # Second parse: CLI args take priority over config-sourced defaults
     (options, args) = parser.parse_args()
+    options.func_forms = func_forms
+
     dofit(options)
 

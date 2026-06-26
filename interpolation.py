@@ -1,6 +1,6 @@
 import ROOT
 from array import array
-import os, sys, re, optparse, pickle, shutil, json, copy
+import os, sys, re, optparse, pickle, shutil, json, copy, glob
 from Utils import returnString
 from DataCardMaker import *
 import argparse
@@ -10,7 +10,8 @@ ROOT.gROOT.SetBatch(True)
 
 parser = argparse.ArgumentParser(description='Interpolate double crystal ball template from signal template fits of masses where we have MC samples available.')
 parser.add_argument("-s", "--signal-model", dest="signal_model", required=True, help="Choose which signal model is used for interpolation.")
-parser.add_argument("-i", "--input", dest="in_file", required=True, help="Input ROOT file containing the fitted values of the signal template fits.")
+parser.add_argument("--json-dir", dest="json_dir", default=None,
+                    help="Directory containing sig_fit_{mass}.json files from fit_signalshapes.py")
 parser.add_argument("--masses", dest="masses", nargs="+", type=float, help="List of target masses (in GeV) for which parameter template JSON files should be created", default=None)
 parser.add_argument("-o","--output",dest="output",help="Output directory", default='.')
 parser.add_argument("-m","--min",dest="min",type=float, help="minimum x",default=0)
@@ -24,27 +25,63 @@ all_graphs = {"graviton" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2
 all_graphs = {"case" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2:pol1,sign2:pol1"}
 
 
+def build_graphs_from_json(json_dir, parameters):
+    json_files = sorted(glob.glob(os.path.join(json_dir, "sig_fit_*.json")))
+    if not json_files:
+        raise RuntimeError(f"No sig_fit_*.json files found in {json_dir}")
+
+    data = {}
+    for jf in json_files:
+        m = re.search(r"sig_fit_(\d+(?:\.\d+)?)\.json", os.path.basename(jf))
+        if m is None:
+            continue
+        mass = float(m.group(1))
+        with open(jf) as f:
+            d = json.load(f)
+        data[mass] = d
+
+    print(f"Loaded {len(data)} mass points from JSON: {sorted(data.keys())}")
+
+    graphs = {}
+    for param in parameters:
+        g = ROOT.TGraphErrors()
+        g.SetName(param)
+        g.SetTitle(param)
+        idx = 0
+        for mass in sorted(data.keys()):
+            val = data[mass].get(param)
+            err = data[mass].get(param + "-err", 0.0)
+            if val is not None:
+                g.SetPoint(idx, mass, val)
+                g.SetPointError(idx, 0.0, abs(err))
+                idx += 1
+        graphs[param] = g
+    return graphs
+
+
 #define output dictionary
-rootFile = ROOT.TFile(args.in_file)
 graphStr = all_graphs[args.signal_model].split(',')
 parameterization = {}
 mass_templates = {}
 if args.masses is not None:
     mass_templates = dict([(mass, {}) for mass in args.masses])
 
-ff=ROOT.TFile(join(args.output, args.signal_model + "_interpolation.root"),"RECREATE")
+# Build TGraph objects: either from JSON directory or from legacy ROOT file
+param_names = [s.split(':')[0] for s in graphStr]
+if args.json_dir:
+    graphs_dict = build_graphs_from_json(args.json_dir, param_names)
+else:
+    raise RuntimeError("--json-dir is required")
+
+ff = ROOT.TFile(join(args.output, args.signal_model + "_interpolation.root"), "RECREATE")
 ff.cd()
 print("graphStr: ", graphStr)
 for string in graphStr:
-    comps =string.split(':')
-    graph=rootFile.Get(comps[0])
-    #import pdb; pdb.set_trace()
+    comps = string.split(':')
+    graph = graphs_dict[comps[0]]
 
     if "pol" in comps[1]:
         func=ROOT.TF1(comps[0]+"_func",comps[1],0,13000)
-        #if (comps[0]=="sign") and (args.signal_model=="graviton"):
-        #    func.SetParameter(0,0)
-        #func=ROOT.TF1(comps[0]+"_func","[0]-[1]*x" ,0,13000)
     elif  comps[1]=="llog":
         func=ROOT.TF1(comps[0]+"_func","[0]+[1]*log(x)",1,13000)
         func.SetParameters(1,1)
@@ -76,12 +113,12 @@ for string in graphStr:
         graph.Fit(func, "", "", args.min, args.max)
         graph.Fit(func, "", "", args.min, args.max)
         graph.Fit(func, "", "", args.min, args.max)
-    
+
     if args.masses is not None:
         for mass in args.masses:
             mass_templates[mass][comps[0]] = func.Eval(mass)
-            
-        
+
+
     parameterization[comps[0]]=returnString(func,comps[1])
 
     c = ROOT.TCanvas()
@@ -103,14 +140,14 @@ if args.masses is not None:
     var = ROOT.RooRealVar("mjj", "mjj", 1450., 6500.)
     card = DataCardMaker('test')
     for i,mass in enumerate(args.masses):
-        
+
         graphs = {}
         outfile_name = join(
             args.output,
             "{}_interpolation_M{}.root".format(args.signal_model, mass))
 
         outfile = ROOT.TFile(outfile_name, "RECREATE")
-        
+
         for key, value in mass_templates[mass].items():
             graphs[key] = ROOT.TGraphErrors()
             graphs[key].SetPoint(0, mass, value)
@@ -122,7 +159,7 @@ if args.masses is not None:
 
         with open(join(args.output, "{}_interpolation_M{}.json".format(args.signal_model, mass)),"w") as f:
             json.dump(mass_templates[mass], f)
-            
+
         #individual plots of shapes
         if(args.plot):
             card.addDCBSignalShape('sig%i' %i, 'mjj', outfile_name, {'CMS_scale_j': 1.0}, {'CMS_res_j': 1.0})

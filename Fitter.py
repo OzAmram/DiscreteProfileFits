@@ -61,7 +61,7 @@ def bernShape(name = 'model', poi = None, order=4, par_label='bern', start_vals=
     return shape, par_names, p_objs
 
 
-def bernPowerShape(name = 'model', poi = None, order=4, par_label='bernPower'):
+def bernPowerShape(name = 'model', poi = None, order=4, par_label='bernPower', start_vals=None):
     # Bernstein polynomial (degree order-1) times a power law: bern(x) * x^c.
     # Implemented as a single RooGenericPdf so only one normalization integral
     # is needed.  Using RooAddPdf(bern, power_law) fails because the power_law
@@ -73,21 +73,23 @@ def bernPowerShape(name = 'model', poi = None, order=4, par_label='bernPower'):
 
     from math import comb
 
-    coeff_init = -0.5
-    coeff_min  = -5.0
-    coeff_max  =  5.0
-    coeff = ROOT.RooRealVar(f"{par_label}_pow_coeff", f"{par_label}_pow_coeff",
-                            coeff_init, coeff_min, coeff_max)
+    cname      = f"{par_label}_pow_coeff"
+    coeff_init = start_vals[cname][0] if (start_vals and cname in start_vals) else 0.0
+    # Lower bound -1: x^c is integrable on [0,1] only for c > -1; preventing
+    # c < -1 stops the optimizer finding the degenerate spike-at-zero solution.
+    coeff = ROOT.RooRealVar(cname, cname, coeff_init, -1.0, 5.0)
 
     bern_pars = []
-    par_names = [f"{par_label}_pow_coeff"]
+    par_names = [cname]
     p_objs    = [coeff]
 
     for i in range(order):
-        p = ROOT.RooRealVar(f"{par_label}_p{i}", f"{par_label}_p{i}", 1.0, 0.0, 20.0)
+        pname  = f"{par_label}_p{i}"
+        p_init = start_vals[pname][0] if (start_vals and pname in start_vals) else 1.0
+        p = ROOT.RooRealVar(pname, pname, p_init, 0.01, 20.0)
         bern_pars.append(p)
         p_objs.append(p)
-        par_names.append(f"{par_label}_p{i}")
+        par_names.append(pname)
 
     # Build Bernstein polynomial of degree (order-1) as a formula string.
     # B_{i,n}(x) = C(n,i) * x^i * (1-x)^(n-i),  n = order-1
@@ -100,6 +102,7 @@ def bernPowerShape(name = 'model', poi = None, order=4, par_label='bernPower'):
         omx_pow = "" if n-i == 0 else ("*(1-@0)"     if n-i == 1 else f"*pow(1-@0,{n-i})")
         terms.append(f"@{i+2}*{c_ni}{x_pow}{omx_pow}")
 
+    #add the power law part
     bern_str = "+".join(terms)
     # Small offset in the power term keeps the integrand finite at x=0
     # while being negligible (< 0.01%) across the physical range.
@@ -154,6 +157,39 @@ def expShape(name, poi = None, order=4, par_label='exp', start_vals=None):
     return shape, par_names, p_objs
 
 
+def expPolyShape(name='model', poi=None, order=2, par_label='expPoly', start_vals=None):
+    # Exponential of a polynomial: exp(p0*x + p1*x^2 + ... + p_{n-1}*x^n)
+    # Implemented as RooGenericPdf; RooFit normalizes numerically over the fit range.
+
+    p_objs = []
+    par_names = []
+    poly_pars = []
+
+    for i in range(order):
+        pname = f"{par_label}_p{i}"
+        # Good starting point: mild falling slope for p0, small corrections for higher orders
+        p_init = start_vals[pname][0] if (start_vals and pname in start_vals) else (-0.05 if i == 0 else 0.0)
+        p = ROOT.RooRealVar(pname, pname, p_init, -10.0, 10.0)
+        poly_pars.append(p)
+        p_objs.append(p)
+        par_names.append(pname)
+
+    arg_list = ROOT.RooArgList()
+    arg_list.add(poi)
+    for p in poly_pars:
+        arg_list.add(p)
+
+    exponent_terms = "+".join(
+        "@%d*pow(@0,%d)" % (i + 1, i + 1) for i in range(order)
+    )
+    formula = "exp(%s)" % exponent_terms
+
+    shape = ROOT.RooGenericPdf(name + "_shape", name + "_shape", formula, arg_list)
+    p_objs.append(arg_list)
+
+    return shape, par_names, p_objs
+
+
 def polyExpShape(name = 'model', poi = None, order=4, par_label='polyExp', start_vals=None):
     #Polynomial times exponential
     # Implemented as RooGenericPdf so the product is self-normalizing.
@@ -204,12 +240,12 @@ def polyExpShape(name = 'model', poi = None, order=4, par_label='polyExp', start
 
 
 shape_map = {
-        "bern": bernShape,
-        "poly": polyShape,
-        "exp": expShape,
-        "polyExp" : polyExpShape,
-        "bernPower" : bernPowerShape,
-
+        "bern":      bernShape,
+        "poly":      polyShape,
+        "exp":       expShape,
+        "polyExp":   polyExpShape,
+        "expPoly":   expPolyShape,
+        "bernPower": bernPowerShape,
         }
 
 

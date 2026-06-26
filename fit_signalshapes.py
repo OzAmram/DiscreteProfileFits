@@ -5,10 +5,15 @@ from Utils import *
 from Fitter import Fitter
 
 def fit_signalmodel(input_file, sig_file_name, mass, x_bins,
-                    plot_dir, dcb_model=False, fit_range = 0.2, plot_label =""):
+                    plot_dir, dcb_model=False, fit_range = 0.2, plot_label ="",
+                    m_data_min=None, m_data_max=None, show_error=True):
 
     mlow = (1.0 - fit_range) * mass
     mhigh = (1.0 + fit_range) * mass
+    if m_data_min is not None:
+        mlow = max(mlow, m_data_min)
+    if m_data_max is not None:
+        mhigh = min(mhigh, m_data_max)
 
     bins_sig_fit = array(
         'f', truncate( x_bins, mlow, mhigh))
@@ -36,10 +41,12 @@ def fit_signalmodel(input_file, sig_file_name, mass, x_bins,
     m_fine.setBins(len(bins_sig_fit))
 
     chi2, ndof = fitter.projection("model_s", "data", "m_fine",
-                                  plot_dir + plot_label + "signal_fit.png")
+                                  plot_dir + plot_label + "signal_fit.png",
+                                  show_error=show_error)
 
     fitter.projection("model_s", "data", "m_fine",
-                      plot_dir + plot_label +  "signal_fit_log.png", logy=True)
+                      plot_dir + plot_label +  "signal_fit_log.png", logy=True,
+                      show_error=show_error)
 
     print("Fit done")
 
@@ -89,8 +96,11 @@ def fit_signals(options):
         plot_label = "M%i_" % mass
         current_fit = fit_signalmodel(options.inputFiles[i], sig_file_name,
                                       mass, binsx, out_dir + "/",
-                                      dcb_model=options.dcbModel, 
-                                      fit_range = options.fitRange, plot_label = plot_label)
+                                      dcb_model=options.dcbModel,
+                                      fit_range=options.fitRange, plot_label=plot_label,
+                                      m_data_min=options.m_data_min,
+                                      m_data_max=options.m_data_max,
+                                      show_error=options.show_error)
 
     print("Done with loop!")
     return
@@ -117,8 +127,14 @@ def fitting_options():
     parser.add_argument("--dcb-model", "--dcbModel", dest="dcbModel", action="store_true",
                         default=False,
                         help="Whether or not to use double crystal ball model")
-    parser.add_argument("--fitRange", dest="fitRange", type = float, default=0.2,
+    parser.add_argument("--fitRange", dest="fitRange", type=float, default=0.2,
                         help="What mass range to perform fit to signal shape over (in terms of frac. of signal mass)")
+    parser.add_argument("--m-data-min", dest="m_data_min", type=float, default=None,
+                        help="Lower bound of available data; fit window is capped at this value")
+    parser.add_argument("--m-data-max", dest="m_data_max", type=float, default=None,
+                        help="Upper bound of available data; fit window is capped at this value")
+    parser.add_argument("--no-error-band", dest="show_error", action="store_false", default=True,
+                        help="Skip VisualizeError MC error band on fit plots (much faster)")
     return parser
 
 

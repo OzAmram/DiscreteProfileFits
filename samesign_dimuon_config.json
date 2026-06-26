@@ -1,0 +1,20 @@
+{
+    "inputFile": "scouting_2024_same_sign_dimuon_mass.h5",
+    "m_min": 14.0,
+    "m_max": 16.0,
+    "bin_size": 0.05,
+    "dcb_model": true,
+    "sqrts": "13.6",
+    "lumi": "",
+    "scale_j_unc": 0.01,
+    "res_j_unc": 0.035,
+    "sig_norm": 100.0,
+    "ftest_thresh": 0.05,
+    "err_thresh": 0.5,
+    "func_forms": {
+        "bern":      [2, 3, 4, 5, 6],
+        "polyExp":   [1, 2, 3],
+        "exp":       [1, 2, 3, 4],
+        "bernPower": [1, 2, 3, 4]
+    }
+}
