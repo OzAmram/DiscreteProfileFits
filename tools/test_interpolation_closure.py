@@ -72,6 +72,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--variant", default="2G")
     parser.add_argument("--exclude-mass", type=int, default=20)
+    parser.add_argument("--fit-mass-max", type=float, default=75.0,
+                        help="Cap training fit points at this mass (match production interpolation)")
     parser.add_argument("--out", default="signal_comparison/closure_test_M{mass}.png")
     args = parser.parse_args()
 
@@ -90,6 +92,8 @@ def main():
             import re
             m = re.search(r"sig_fit_(\d+)\.json", os.path.basename(jf))
             if m and int(m.group(1)) == mass:
+                continue
+            if m and int(m.group(1)) > args.fit_mass_max:
                 continue
             shutil.copy(jf, tmpdir)
 

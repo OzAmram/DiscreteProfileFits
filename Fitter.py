@@ -252,10 +252,13 @@ shape_map = {
 
 class Fitter(object):
     def __init__(self,poi = ['x'], debug = False, outdir=""):
-        self.cache_name = "cache%i.root"%(random.randint(0, 1e+6))
+        self.outdir = outdir
+        # Keep the scratch cache file inside outdir (not the cwd) so that if a
+        # fit crashes before cleanup, the orphan lands in the job's own results
+        # dir rather than polluting the repo root.
+        self.cache_name = os.path.join(outdir, "cache%i.root"%(random.randint(0, 1e+6)))
         print("Making cache %s "  % self.cache_name)
         self.cache=ROOT.TFile(self.cache_name,"RECREATE")
-        self.outdir = outdir
         self.cache.cd()
         self.debug = debug
         self.cleanedup = False
@@ -270,10 +273,19 @@ class Fitter(object):
 
 
     def __del__(self):
-        if(not self.cleanedup): self.delete()
+        # Backstop only; callers should invoke delete() explicitly (ideally in a
+        # finally:) since __del__ is not guaranteed to run if the worker is killed.
+        if(not getattr(self, "cleanedup", True)): self.delete()
 
     def delete(self):
-        os.system("rm %s" % self.cache_name)
+        # Close the TFile first so ROOT releases the handle, then remove it.
+        try:
+            if getattr(self, "cache", None) is not None and self.cache.IsOpen():
+                self.cache.Close()
+        except Exception:
+            pass
+        if os.path.exists(self.cache_name):
+            os.remove(self.cache_name)
         self.cleanedup = True
 
     def importBinnedData(self,histogram,poi = "x",name = "data", regions=[]):
@@ -473,8 +485,10 @@ class Fitter(object):
         ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
         
         self.w.factory("MH[1000]")
-        self.w.factory("mean[%.1f,%.1f,%.1f]"%(mass,0.8*mass,1.2*mass))
-        self.w.factory("sigma[%.1f,%.1f,%.1f]"%(mass*0.02,mass*0.005,mass*0.10))
+        self.w.factory("mean[%.4f,%.4f,%.4f]"%(mass,0.8*mass,1.2*mass))
+        # Use %g/%.4f precision: %.1f rounded the lower bound mass*0.005 up (e.g. M10:
+        # 0.05 -> 0.1), which forced a spurious 0.1 GeV sigma floor on low-mass fits.
+        self.w.factory("sigma[%.4f,%.4f,%.4f]"%(mass*0.02,mass*0.005,mass*0.10))
         self.w.factory("alpha[1.2,0.0,18]")
         self.w.factory("alpha2[1.2,0.0,10]")
         self.w.factory("sign[5,0,600]")

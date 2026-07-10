@@ -2,3 +2,22 @@
 *.h5
 *.un~
 *.swp
+__pycache__/
+.vscode/
+
+# Fitter scratch cache (should be auto-removed, but ignore any stray ones)
+cache*.root
+fitresults.root
+
+# Study / fit result artifacts: kept locally, not tracked (tens of thousands of
+# per-fit .json/.png/.log files). Only the code that produces them is versioned.
+/studies/bias_validation/
+/studies/bkg_mc_validation/
+/studies/config_scan/
+/data_fits/
+/data_spectra/
+/signal_fits/
+/signal_fits_uaf/
+/signal_comparison/
+/signal_data/
+/signal_data_uaf/

@@ -102,42 +102,45 @@ def dofit(options):
 
             model_name = "model_b" + str(i)
             fitter_bkg = Fitter(['m_fine'], debug = False, outdir=plot_dir)
-            fitter_bkg.importBinnedData(fitting_histogram, 'm_fine', data_name)
-            fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
-            
-            fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
+            # Ensure the scratch cache is always removed, even if the fit raises.
+            try:
+                fitter_bkg.importBinnedData(fitting_histogram, 'm_fine', data_name)
+                fitter_bkg.bkgShape(name=model_name, poi='m_fine', order=order, func_form=func_form )
 
-            chi2_fine, ndof_fine = fitter_bkg.projection(
-                model=model_name, data=data_name, poi="m_fine",
-                filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False,
-                show_error=False)
+                fres = fitter_bkg.fit(model_name, data_name, options=[ROOT.RooFit.Save(1), ROOT.RooFit.Verbose(0),  ROOT.RooFit.Minos(1), ROOT.RooFit.Minimizer("Minuit2")])
 
-            chi2_prob = ROOT.TMath.Prob(chi2_fine, ndof_fine)
+                chi2_fine, ndof_fine = fitter_bkg.projection(
+                    model=model_name, data=data_name, poi="m_fine",
+                    filename=plot_dir +func_form + "_" + str(order) + "par_bkg_fit.png", binning=0, logy=False,
+                    show_error=False)
 
-            bkg_fit_params = dict()
-            for parName in fitter_bkg.par_names:
-                value, error = fitter_bkg.fetch(parName)
-                bkg_fit_params[parName] = (value, error)
+                chi2_prob = ROOT.TMath.Prob(chi2_fine, ndof_fine)
 
-            bkg_fit_params['par_names'] = fitter_bkg.par_names
-            bkg_fit_params['cov'] = convert_matrix(fres.covarianceMatrix())
+                bkg_fit_params = dict()
+                for parName in fitter_bkg.par_names:
+                    value, error = fitter_bkg.fetch(parName)
+                    bkg_fit_params[parName] = (value, error)
 
-
-            with open(bkg_fnames[i], "w") as jsonfile:
-                json.dump(bkg_fit_params, jsonfile, indent=4)
+                bkg_fit_params['par_names'] = fitter_bkg.par_names
+                bkg_fit_params['cov'] = convert_matrix(fres.covarianceMatrix())
 
 
-            print("#############################")
-            print("Order %i results: " % order)
-            print("bkg fit chi2/nbins (fine binning) ", chi2_fine, ndof_fine, chi2_fine/ndof_fine, chi2_prob)
-            print("#############################")
+                with open(bkg_fnames[i], "w") as jsonfile:
+                    json.dump(bkg_fit_params, jsonfile, indent=4)
 
-            chi2s[i] = chi2_fine
-            ndofs[i] = ndof_fine
-            probs[i] = chi2_prob
-            fit_params[i] = bkg_fit_params
-            fit_errs[i] = 0. # Deprecated
-            fitter_bkg.delete()
+
+                print("#############################")
+                print("Order %i results: " % order)
+                print("bkg fit chi2/nbins (fine binning) ", chi2_fine, ndof_fine, chi2_fine/ndof_fine, chi2_prob)
+                print("#############################")
+
+                chi2s[i] = chi2_fine
+                ndofs[i] = ndof_fine
+                probs[i] = chi2_prob
+                fit_params[i] = bkg_fit_params
+                fit_errs[i] = 0. # Deprecated
+            finally:
+                fitter_bkg.delete()
 
         #F-test on this functional for to determine best num of parameters
         best_i = f_test(orderToTry, ndofs, chi2s, fit_errs, thresh = options.ftest_thresh, err_thresh = options.err_thresh)
@@ -173,15 +176,17 @@ def dofit(options):
     cmd = (
         " cd {plot_dir} ; "
         + "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root; "
-        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace; "
-        + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2}; "
+        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace --rMin -5 --rMax 10; "
+        + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} --rMax 10; "
         ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label)
     print(cmd)
     os.system(cmd)
     workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
 
+    # combine formats the -m value with %g (e.g. 15 -> mH15, 15.2 -> mH15.2),
+    # so match that here rather than rounding to an int (breaks non-integer masses).
     f_limit_name = (plot_dir + 'higgsCombinelim_{l1}_{l2}.'
-                    + 'AsymptoticLimits.mH{mass:.0f}.root'
+                    + 'AsymptoticLimits.mH{mass:g}.root'
                     ).format(mass=mass, l1=label, l2=fit_label)
     f_diagnostics_name = (plot_dir + 'fitDiagnostics_{l1}_{l2}.root'
                    ).format(l1=label, l2=fit_label)
@@ -192,6 +197,15 @@ def dofit(options):
     params_sb.GetEntry(0)
     sig_strength = params_sb.r
     sig_strength_unc = params_sb.rErr
+    # robustFit + cminDefaultMinimizerStrategy 0 can leave the symmetric rErr at 0;
+    # fall back to the MINOS errors (rLoErr/rHiErr) which combine still computes.
+    try:
+        rlo = abs(params_sb.rLoErr)
+        rhi = abs(params_sb.rHiErr)
+        if sig_strength_unc <= 0 and (rlo > 0 or rhi > 0):
+            sig_strength_unc = 0.5 * (rlo + rhi)
+    except Exception:
+        pass
     nll_sb = params_sb.nll_min
 
 

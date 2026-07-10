@@ -22,7 +22,7 @@ COLORS = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple"]
 MARKERS = ["o", "s", "^", "D", "v"]
 
 
-def load_fit_dir(fit_dir):
+def load_fit_dir(fit_dir, mass_min=None, mass_max=None):
     json_files = sorted(glob.glob(os.path.join(fit_dir, "sig_fit_*.json")))
     data = {}
     for jf in json_files:
@@ -30,6 +30,10 @@ def load_fit_dir(fit_dir):
         if m is None:
             continue
         mass = float(m.group(1))
+        if mass_min is not None and mass < mass_min:
+            continue
+        if mass_max is not None and mass > mass_max:
+            continue
         with open(jf) as f:
             data[mass] = json.load(f)
     return data
@@ -47,6 +51,10 @@ def main():
                         help="Output directory for comparison plots")
     parser.add_argument("--params", nargs="+", default=DCB_PARAMS,
                         help="Which DCB parameters to plot")
+    parser.add_argument("--mass-min", type=float, default=None,
+                        help="Exclude fit points below this mass")
+    parser.add_argument("--mass-max", type=float, default=None,
+                        help="Exclude fit points above this mass")
     args = parser.parse_args()
 
     if len(args.fit_dirs) != len(args.labels):
@@ -56,7 +64,7 @@ def main():
 
     datasets = {}
     for label, fit_dir in zip(args.labels, args.fit_dirs):
-        datasets[label] = load_fit_dir(fit_dir)
+        datasets[label] = load_fit_dir(fit_dir, mass_min=args.mass_min, mass_max=args.mass_max)
         masses = sorted(datasets[label].keys())
         print(f"  {label}: {len(masses)} mass points  {masses[0]:.0f}–{masses[-1]:.0f} GeV")
 

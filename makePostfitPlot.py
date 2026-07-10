@@ -193,9 +193,17 @@ def make_postfit_plot(opt):
         print("ERROR: 'multi_pdf' not found in workspace")
         sys.exit(1)
 
-    # Background normalization
+    # Background normalization.
+    # This workspace ('w', the datacardInputs) knows the flatParam
+    # "multi_pdf_norm", but combine renames the fitted background yield to
+    # "shapeBkg_background_<cat>__norm" in its RooFitResult -- a name absent from
+    # this workspace. So the pre-fit multi_pdf_norm value here is only a fallback;
+    # the authoritative post-fit background yield is read from the RooFitResult
+    # below (combine_bkg_norm). Getting this right matters in S+B mode: fit_s
+    # sets the background norm to (data - signal), while fit_b sets it to data.
     bkg_norm_var = w.var("multi_pdf_norm")
     bkg_norm_fit = bkg_norm_var.getVal() if bkg_norm_var else data.sumEntries()
+    combine_bkg_norm = None   # post-fit shapeBkg_background_<cat>__norm from RooFitResult
 
     # Signal PDF  (may not be present for bkg-only workspaces)
     sig_pdf_name = "model_signal_m_%s" % opt.cat
@@ -210,6 +218,8 @@ def make_postfit_plot(opt):
     #     S+B fit: tree_fit_sb / fit_s   |   bkg-only fit: tree_fit_b / fit_b
     # ---------------------------------------------------------------------------
     r_fit        = 0.0
+    r_err_fit    = 0.0
+    selected_pdf_index = None   # combine's post-fit pdf_index (RooMultiPdf choice)
 
     tree_name   = "tree_fit_b"  if bkg_only else "tree_fit_sb"
     fitres_name = "fit_b"       if bkg_only else "fit_s"
@@ -226,7 +236,16 @@ def make_postfit_plot(opt):
             fit_tree.GetEntry(0)
             if not bkg_only:
                 r_fit = float(fit_tree.r)
-                print("   Postfit signal strength  r = %.4f" % r_fit)
+                # Symmetric rErr can be 0 with robustFit+strategy0; fall back to
+                # the (averaged) MINOS errors, mirroring doFit's handling.
+                r_err_fit = float(getattr(fit_tree, "rErr", 0.0) or 0.0)
+                try:
+                    rlo, rhi = abs(fit_tree.rLoErr), abs(fit_tree.rHiErr)
+                    if r_err_fit <= 0 and (rlo > 0 or rhi > 0):
+                        r_err_fit = 0.5 * (rlo + rhi)
+                except Exception:
+                    pass
+                print("   Postfit signal strength  r = %.4f +/- %.4f" % (r_fit, r_err_fit))
 
             # Use the RooFitResult to set ALL floating parameters (including
             # background shape parameters like bern_p0, exp_p0, etc.).
@@ -240,13 +259,39 @@ def make_postfit_plot(opt):
                 par_iter   = final_pars.createIterator()
                 par = par_iter.Next()
                 n_set = 0
+                norm_name = "shapeBkg_background_%s__norm" % opt.cat
                 while par:
-                    wvar = w.var(par.GetName())
+                    pname = par.GetName()
+                    # Combine's fitted background yield (renamed by text2workspace,
+                    # so not present in this workspace as a settable var).
+                    if pname == norm_name or (
+                            combine_bkg_norm is None
+                            and pname.startswith("shapeBkg_")
+                            and pname.endswith("__norm")):
+                        combine_bkg_norm = par.getVal()
+                    wvar = w.var(pname)
                     if wvar:
                         wvar.setVal(par.getVal())
                         n_set += 1
                     par = par_iter.Next()
                 print("   Set %d postfit parameters from %s RooFitResult" % (n_set, fitres_name))
+
+                # Recover combine's post-fit RooMultiPdf choice. The discrete
+                # pdf_index is profiled during the fit but not stored in the
+                # tree; it lives as a RooCategory in the RooFitResult constPars.
+                # Using it (instead of a chi2 scan vs data) is essential in S+B
+                # mode: the scan can pick a different pdf than the one combine
+                # actually floated, so its parameters are still pre-fit and the
+                # resulting b+s chi2 is meaningless. See the pdf_index -> name
+                # mapping below (index i == multipdf.getPdf(i)).
+                idx_cat = fit_result.constPars().find("pdf_index")
+                if idx_cat:
+                    try:
+                        selected_pdf_index = int(idx_cat.getIndex())
+                        print("   Combine post-fit pdf_index = %d (%s)"
+                              % (selected_pdf_index, idx_cat.getLabel()))
+                    except Exception:
+                        selected_pdf_index = None
             else:
                 # Fallback: iterate workspace vars and match to tree leaves.
                 # This will miss freely-floating background shape parameters.
@@ -262,8 +307,15 @@ def make_postfit_plot(opt):
                         v.setVal(leaf.GetValue())
                     v = var_iter.Next()
 
-            # Refresh bkg norm after parameter update
-            if bkg_norm_var:
+            # Refresh bkg norm after parameter update. Prefer combine's fitted
+            # yield (shapeBkg_background_<cat>__norm); it correctly holds
+            # (data - signal) in S+B mode, whereas the workspace's multi_pdf_norm
+            # is not touched by combine's rename and would leave b+s overshooting
+            # the data by the signal yield.
+            if combine_bkg_norm is not None:
+                bkg_norm_fit = combine_bkg_norm
+                print("   Using combine fitted background norm = %.1f" % bkg_norm_fit)
+            elif bkg_norm_var:
                 bkg_norm_fit = bkg_norm_var.getVal()
 
             f_diag.Close()
@@ -273,8 +325,9 @@ def make_postfit_plot(opt):
             r_fit = 0.0
 
     print("   Background norm (postfit) = %.1f events" % bkg_norm_fit)
-    sig_events = r_fit * opt.sigNorm
-    print("   Signal events (r*norm)    = %.1f"         % sig_events)
+    sig_events     = r_fit * opt.sigNorm
+    sig_events_unc = r_err_fit * opt.sigNorm
+    print("   Signal events (r*norm)    = %.1f +/- %.1f" % (sig_events, sig_events_unc))
 
 
     # ---------------------------------------------------------------------------
@@ -320,25 +373,42 @@ def make_postfit_plot(opt):
     hists["data"] = norm_to_phys(h_data_norm, "h_data")
     hists["data"].SetBinErrorOption(ROOT.TH1.kPoisson)
 
-    # Determine best-fit PDF by chi2 scan against data.
+    # Determine the best-fit background PDF.
+    #
     # combine profiles over pdf_index during the fit and only floats the
-    # parameters for the selected pdf; the others stay at initial values.
-    # After loading postfit parameters the best-fit pdf has the smallest chi2.
-    best_chi2    = float('inf')
-    bpdf_bf_name = list(bpdfs.keys())[0]
-    for pname in bpdfs:
-        h_c = hists["%s_nBins" % pname]
-        c2  = 0.
-        for ibin in range(1, opt.nBins + 1):
-            d = hists["data"].GetBinContent(ibin)
-            b = h_c.GetBinContent(ibin)
-            if b > 0:
-                c2 += (d - b) ** 2 / b
-        print("   chi2 scan: %s -> %.1f" % (pname, c2))
-        if c2 < best_chi2:
-            best_chi2    = c2
-            bpdf_bf_name = pname
-    print("   Best-fit PDF (chi2 scan): %s" % bpdf_bf_name)
+    # parameters for the selected pdf; the others keep their pre-fit values.
+    # So the ONLY correct choice is combine's own pdf_index, recovered above
+    # from the RooFitResult (index i == multipdf.getPdf(i) == i-th entry of
+    # bpdfs). Picking a pdf by a chi2 scan of the background-only curve vs the
+    # data is wrong in S+B mode -- the data contains the signal, so the scan can
+    # select a different pdf than combine floated, whose parameters are still
+    # pre-fit; adding the fitted signal on top then inflates the chi2 spuriously.
+    pdf_names = list(bpdfs.keys())
+    bpdf_bf_name = None
+    if selected_pdf_index is not None and 0 <= selected_pdf_index < len(pdf_names):
+        bpdf_bf_name = pdf_names[selected_pdf_index]
+        print("   Best-fit PDF (combine pdf_index=%d): %s"
+              % (selected_pdf_index, bpdf_bf_name))
+    else:
+        # Fallback (no pdf_index available): chi2 scan of bkg-only vs data.
+        # Reliable only in bkg-only mode; kept for robustness.
+        print("   WARNING: combine pdf_index unavailable; falling back to "
+              "chi2-scan PDF selection (unreliable in S+B mode)")
+        best_chi2    = float('inf')
+        bpdf_bf_name = pdf_names[0]
+        for pname in bpdfs:
+            h_c = hists["%s_nBins" % pname]
+            c2  = 0.
+            for ibin in range(1, opt.nBins + 1):
+                d = hists["data"].GetBinContent(ibin)
+                b = h_c.GetBinContent(ibin)
+                if b > 0:
+                    c2 += (d - b) ** 2 / b
+            print("   chi2 scan: %s -> %.1f" % (pname, c2))
+            if c2 < best_chi2:
+                best_chi2    = c2
+                bpdf_bf_name = pname
+        print("   Best-fit PDF (chi2 scan): %s" % bpdf_bf_name)
 
     # Signal histogram (fine-binned for drawing, coarse-binned for chi2)
     if opt.drawSignal and sig_pdf:
@@ -474,7 +544,7 @@ def make_postfit_plot(opt):
     h_axes.Reset()
     data_max    = hists["data"].GetMaximum()
     data_max_err = hists["data"].GetBinError(hists["data"].GetMaximumBin())
-    h_axes.SetMaximum((data_max + data_max_err) * 2.2)
+    h_axes.SetMaximum((data_max + data_max_err) * 2.5)
     h_axes.SetMinimum(0.)
     h_axes.SetTitle("")
     h_axes.GetXaxis().SetTitle("")
@@ -487,23 +557,29 @@ def make_postfit_plot(opt):
     h_axes.Draw()
 
     # ---- Legends side-by-side in the upper headroom ----
+    # Two non-overlapping columns; text kept small enough that the signal-yield
+    # entry does not spill into the background column or onto the chi2 label.
     #leg of data + signal
-    leg0 = ROOT.TLegend(0.17, 0.60, 0.54, 0.8)
+    leg0 = ROOT.TLegend(0.17, 0.62, 0.53, 0.80)
     leg0.SetFillStyle(0)
     leg0.SetLineColor(0)
-    leg0.SetTextSize(0.045)
+    leg0.SetTextSize(0.040)
+    leg0.SetMargin(0.25)
     leg0.AddEntry(hists["data"], "Data", "ep")
     if "signal" in hists:
-        leg0.AddEntry(
-            hists["signal"],
-            "Signal (#mu=%.2f), m=%.0f GeV" % (r_fit, opt.mass),
-            "fl")
+        if sig_events_unc > 0:
+            sig_lbl = "Signal: %.0f #pm %.0f events" % (sig_events, sig_events_unc)
+        else:
+            sig_lbl = "Signal: %.0f events" % sig_events
+        leg0.AddEntry(hists["signal"], sig_lbl, "fl")
+        leg0.AddEntry(0, "m = %.0f GeV" % opt.mass, "")
 
     # leg for backgrounds
-    leg = ROOT.TLegend(0.54, 0.6, 0.93, 0.80)
+    leg = ROOT.TLegend(0.55, 0.60, 0.94, 0.80)
     leg.SetFillStyle(0)
     leg.SetLineColor(0)
-    leg.SetTextSize(0.05)
+    leg.SetTextSize(0.040)
+    leg.SetMargin(0.25)
 
     # ---- Signal ----
     if "signal" in hists:
@@ -539,9 +615,9 @@ def make_postfit_plot(opt):
     lat_chi2.SetTextFont(42)
     lat_chi2.SetTextAlign(11)
     lat_chi2.SetNDC()
-    lat_chi2.SetTextSize(0.05)
+    lat_chi2.SetTextSize(0.045)
     lat_chi2.DrawLatex(
-        0.17, 0.54,
+        0.17, 0.55,
         "#chi^{2}/ndof = %.1f/%d  (p = %.2f)" % (chi2_val, ndof, chi2_prob))
 
     # ---- CMS / lumi labels (via CMS_lumi.py) ----

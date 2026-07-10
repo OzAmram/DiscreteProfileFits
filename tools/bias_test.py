@@ -1,4 +1,7 @@
-import os
+import os, sys
+# Archived under tools/; add the repo root to the path so the core modules
+# (Fitter, DataCardMaker, Utils, ...) still import when run as tools/bias_test.py.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Fitter import Fitter
 from DataCardMaker import DataCardMaker
 import Utils as utils

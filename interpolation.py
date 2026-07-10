@@ -13,6 +13,10 @@ parser.add_argument("-s", "--signal-model", dest="signal_model", required=True, 
 parser.add_argument("--json-dir", dest="json_dir", default=None,
                     help="Directory containing sig_fit_{mass}.json files from fit_signalshapes.py")
 parser.add_argument("--masses", dest="masses", nargs="+", type=float, help="List of target masses (in GeV) for which parameter template JSON files should be created", default=None)
+parser.add_argument("--fit-mass-max", dest="fit_mass_max", type=float, default=None,
+                    help="Exclude input sig_fit points above this mass from the interpolation")
+parser.add_argument("--fit-mass-min", dest="fit_mass_min", type=float, default=None,
+                    help="Exclude input sig_fit points below this mass from the interpolation")
 parser.add_argument("-o","--output",dest="output",help="Output directory", default='.')
 parser.add_argument("-m","--min",dest="min",type=float, help="minimum x",default=0)
 parser.add_argument("-M","--max",dest="max",type=float, help="maximum x",default=0)
@@ -25,7 +29,7 @@ all_graphs = {"graviton" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2
 all_graphs = {"case" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2:pol1,sign2:pol1"}
 
 
-def build_graphs_from_json(json_dir, parameters):
+def build_graphs_from_json(json_dir, parameters, mass_min=None, mass_max=None):
     json_files = sorted(glob.glob(os.path.join(json_dir, "sig_fit_*.json")))
     if not json_files:
         raise RuntimeError(f"No sig_fit_*.json files found in {json_dir}")
@@ -36,6 +40,10 @@ def build_graphs_from_json(json_dir, parameters):
         if m is None:
             continue
         mass = float(m.group(1))
+        if mass_min is not None and mass < mass_min:
+            continue
+        if mass_max is not None and mass > mass_max:
+            continue
         with open(jf) as f:
             d = json.load(f)
         data[mass] = d
@@ -69,7 +77,8 @@ if args.masses is not None:
 # Build TGraph objects: either from JSON directory or from legacy ROOT file
 param_names = [s.split(':')[0] for s in graphStr]
 if args.json_dir:
-    graphs_dict = build_graphs_from_json(args.json_dir, param_names)
+    graphs_dict = build_graphs_from_json(args.json_dir, param_names,
+                                         mass_min=args.fit_mass_min, mass_max=args.fit_mass_max)
 else:
     raise RuntimeError("--json-dir is required")
 

@@ -21,11 +21,18 @@ def get_sigma(sig_dir, mass):
         return json.load(f)["sigma"], sig_json
 
 
-def run_fit(mass, sigma, n_sigma, config, sig_json, outdir):
-    bin_size = round(0.25 * sigma, 4)
-    m_min    = round(max(30.0, mass - n_sigma * sigma), 4)
-    m_max    = round(mass + n_sigma * sigma, 4)
+def compute_window(mass, sigma, n_sigma, m_data_min, m_data_max, bin_frac=0.25):
+    bin_size = round(bin_frac * sigma, 4)
+    m_min    = mass - n_sigma * sigma
+    m_max    = mass + n_sigma * sigma
+    if m_data_min is not None:
+        m_min = max(m_min, m_data_min)
+    if m_data_max is not None:
+        m_max = min(m_max, m_data_max)
+    return round(m_min, 4), round(m_max, 4), bin_size
 
+
+def run_fit(mass, m_min, m_max, bin_size, config, sig_json, outdir, input_file=None):
     os.makedirs(outdir, exist_ok=True)
 
     cmd = [
@@ -38,6 +45,8 @@ def run_fit(mass, sigma, n_sigma, config, sig_json, outdir):
         "-s", sig_json,
         "-o", outdir,
     ]
+    if input_file is not None:
+        cmd += ["-i", input_file]
 
     log_path = os.path.join(outdir, "fit_log.txt")
     print(f"    cmd: {' '.join(cmd)}")
@@ -81,6 +90,14 @@ def main():
                         help="Minimum half-width before declaring failure (default 4)")
     parser.add_argument("--n-sigma-step", type=float, default=0.5,
                         help="Step size for shrinking the window (default 0.5)")
+    parser.add_argument("--bin-frac", type=float, default=0.25,
+                        help="Bin size as a fraction of sigma (default 0.25)")
+    parser.add_argument("--m-data-min", type=float, default=None,
+                        help="Lower data boundary; fit window is floored here (default: no floor)")
+    parser.add_argument("--m-data-max", type=float, default=None,
+                        help="Upper data boundary; fit window is capped here (default: no cap)")
+    parser.add_argument("-i", "--input", default=None,
+                        help="Override the config's input h5 file (e.g. a mock signal-injected dataset)")
     args = parser.parse_args()
 
     mass = args.mass
@@ -97,14 +114,14 @@ def main():
     final_dir = None
 
     while n_sigma >= args.n_sigma_min - 1e-9:
-        m_min    = round(max(30.0, mass - n_sigma * sigma), 3)
-        m_max    = round(mass + n_sigma * sigma, 3)
-        bin_size = round(0.25 * sigma, 4)
+        m_min, m_max, bin_size = compute_window(
+            mass, sigma, n_sigma, args.m_data_min, args.m_data_max, args.bin_frac)
 
         print(f"\n  ±{n_sigma:.1f}σ  →  [{m_min}, {m_max}] GeV,  bin_size={bin_size} GeV")
 
         attempt_dir = os.path.join(outbase, f"window_{n_sigma:.1f}sig")
-        pval = run_fit(mass, sigma, n_sigma, args.config, sig_json, attempt_dir)
+        pval = run_fit(mass, m_min, m_max, bin_size, args.config, sig_json,
+                       attempt_dir, input_file=args.input)
 
         if pval is None:
             print(f"  --> fit failed, shrinking window")
@@ -128,9 +145,10 @@ def main():
             shutil.rmtree(best_dir)
         shutil.copytree(final_dir, best_dir)
 
+        win_min, win_max, _ = compute_window(
+            mass, sigma, n_sigma, args.m_data_min, args.m_data_max, args.bin_frac)
         print(f"SUCCESS  M={mass} GeV  ±{n_sigma:.1f}σ  p={pval:.4f}")
-        print(f"  Winning window : [{round(max(30.0, mass-n_sigma*sigma),3)}, "
-              f"{round(mass+n_sigma*sigma,3)}] GeV")
+        print(f"  Winning window : [{win_min}, {win_max}] GeV")
         print(f"  Results        : {best_dir}")
     else:
         print(f"FAILURE  M={mass} GeV  could not achieve p >= {args.pval_thresh} "

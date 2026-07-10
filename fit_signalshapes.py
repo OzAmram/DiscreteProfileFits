@@ -25,7 +25,9 @@ def fit_signalmodel(input_file, sig_file_name, mass, x_bins,
     load_h5_sb(input_file, histos_sig)
     histos_sig.Print("range")
 
-    fitter = Fitter(['m_fine'])
+    # Write fitresults.root into this fit's own output dir; the default ("") puts
+    # it in cwd with a fixed name, which collides when fits run concurrently.
+    fitter = Fitter(['m_fine'], outdir=plot_dir)
 
     fitter.signalShape('model_s', "m_fine", mass, options.sig_shape)
 
@@ -94,13 +96,19 @@ def fit_signals(options):
         print("########## FIT SIGNAL %.2f AND SAVE PARAMETERS ############" % mass)
         sig_file_name = os.path.join(out_dir, "sig_fit_{}.json".format(mass))
         plot_label = "M%i_" % mass
-        current_fit = fit_signalmodel(options.inputFiles[i], sig_file_name,
-                                      mass, binsx, out_dir + "/",
-                                      dcb_model=options.dcbModel,
-                                      fit_range=options.fitRange, plot_label=plot_label,
-                                      m_data_min=options.m_data_min,
-                                      m_data_max=options.m_data_max,
-                                      show_error=options.show_error)
+        current_fit = None
+        try:
+            current_fit = fit_signalmodel(options.inputFiles[i], sig_file_name,
+                                          mass, binsx, out_dir + "/",
+                                          dcb_model=options.dcbModel,
+                                          fit_range=options.fitRange, plot_label=plot_label,
+                                          m_data_min=options.m_data_min,
+                                          m_data_max=options.m_data_max,
+                                          show_error=options.show_error)
+        finally:
+            # Always drop the scratch cache file, even if this mass's fit crashed.
+            if current_fit is not None:
+                current_fit.delete()
 
     print("Done with loop!")
     return
