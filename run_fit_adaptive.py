@@ -76,7 +76,7 @@ def main():
         description="Adaptive-window background fit for a single mass hypothesis")
     parser.add_argument("-M", "--mass", type=float, required=True,
                         help="Signal mass hypothesis (GeV)")
-    parser.add_argument("-c", "--config", default="bkg_mc_config.json",
+    parser.add_argument("-c", "--config", default="dimuonX_config.json",
                         help="JSON config file")
     parser.add_argument("-s", "--sig-dir", default="signal_fits/2G",
                         help="Directory containing case_interpolation_M{mass}.json files")
@@ -91,7 +91,13 @@ def main():
     parser.add_argument("--n-sigma-step", type=float, default=0.5,
                         help="Step size for shrinking the window (default 0.5)")
     parser.add_argument("--bin-frac", type=float, default=0.25,
-                        help="Bin size as a fraction of sigma (default 0.25)")
+                        help="Starting bin size as a fraction of sigma (default 0.25)")
+    parser.add_argument("--bin-frac-max", type=float, default=1.0,
+                        help="Max bin size (in sigma) to escalate to when GoF fails at "
+                             "every window; coarser bins are less sensitive to narrow "
+                             "fluctuations landing in one bin (default 1.0)")
+    parser.add_argument("--bin-frac-step", type=float, default=0.1,
+                        help="Bin-size escalation step in sigma (default 0.1)")
     parser.add_argument("--m-data-min", type=float, default=None,
                         help="Lower data boundary; fit window is floored here (default: no floor)")
     parser.add_argument("--m-data-max", type=float, default=None,
@@ -104,58 +110,88 @@ def main():
     sigma, sig_json = get_sigma(args.sig_dir, mass)
     outbase = args.outdir or f"bkg_mc_fits/M{int(mass)}"
 
+    # bin sizes (in sigma) to try, escalating from the default only on failure
+    bin_fracs = []
+    bf = args.bin_frac
+    while bf <= max(args.bin_frac_max, args.bin_frac) + 1e-9:
+        bin_fracs.append(round(bf, 4))
+        bf += args.bin_frac_step
+
     print(f"\nM = {mass} GeV   sigma = {sigma:.3f} GeV")
     print(f"Window scan: ±{args.n_sigma_start}σ → ±{args.n_sigma_min}σ "
-          f"(step {args.n_sigma_step}σ),  p-value threshold = {args.pval_thresh}")
+          f"(step {args.n_sigma_step}σ);  bin size {args.bin_frac}σ → "
+          f"{bin_fracs[-1]}σ (step {args.bin_frac_step}σ) on failure;  "
+          f"p-value threshold = {args.pval_thresh}")
     print("="*60)
 
-    n_sigma   = args.n_sigma_start
-    success   = False
-    final_dir = None
+    success    = False
+    final_dir  = final_nsig = final_bf = final_pval = None
+    # Fallback: the highest-p attempt across the whole (bin size, window) grid. If
+    # GoF is never achieved we keep this as 'best' and report its poor p-value,
+    # rather than dropping the mass point from the scan entirely.
+    best_dir = best_pval = best_nsig = best_bf = None
 
-    while n_sigma >= args.n_sigma_min - 1e-9:
-        m_min, m_max, bin_size = compute_window(
-            mass, sigma, n_sigma, args.m_data_min, args.m_data_max, args.bin_frac)
+    for bf in bin_fracs:
+        n_sigma = args.n_sigma_start
+        while n_sigma >= args.n_sigma_min - 1e-9:
+            m_min, m_max, bin_size = compute_window(
+                mass, sigma, n_sigma, args.m_data_min, args.m_data_max, bf)
 
-        print(f"\n  ±{n_sigma:.1f}σ  →  [{m_min}, {m_max}] GeV,  bin_size={bin_size} GeV")
+            print(f"\n  bin={bf:.1f}σ  ±{n_sigma:.1f}σ  →  [{m_min}, {m_max}] GeV,  "
+                  f"bin_size={bin_size} GeV")
 
-        attempt_dir = os.path.join(outbase, f"window_{n_sigma:.1f}sig")
-        pval = run_fit(mass, m_min, m_max, bin_size, args.config, sig_json,
-                       attempt_dir, input_file=args.input)
+            attempt_dir = os.path.join(outbase, f"bin{bf:.1f}_window{n_sigma:.1f}sig")
+            pval = run_fit(mass, m_min, m_max, bin_size, args.config, sig_json,
+                           attempt_dir, input_file=args.input)
 
-        if pval is None:
-            print(f"  --> fit failed, shrinking window")
-        else:
-            print(f"  --> sbfit chi2 p-value = {pval:.4f}", end="")
-            if pval >= args.pval_thresh:
-                print(f"  PASS ✓")
-                success   = True
-                final_dir = attempt_dir
-                break
+            if pval is None:
+                print(f"  --> fit failed, shrinking window")
             else:
-                print(f"  FAIL (< {args.pval_thresh}), shrinking window")
+                if best_pval is None or pval > best_pval:
+                    best_dir, best_pval, best_nsig, best_bf = attempt_dir, pval, n_sigma, bf
+                print(f"  --> sbfit chi2 p-value = {pval:.4f}", end="")
+                if pval >= args.pval_thresh:
+                    print(f"  PASS ✓")
+                    success = True
+                    final_dir, final_nsig, final_bf, final_pval = attempt_dir, n_sigma, bf, pval
+                    break
+                else:
+                    print(f"  FAIL (< {args.pval_thresh}), shrinking window")
 
-        n_sigma -= args.n_sigma_step
+            n_sigma -= args.n_sigma_step
+
+        if success:
+            break
+        if bf != bin_fracs[-1]:
+            print(f"\n  --> window scan failed at bin={bf:.1f}σ; increasing bin size to "
+                  f"{round(bf + args.bin_frac_step, 4)}σ")
 
     print("\n" + "="*60)
-    if success:
-        # Copy successful attempt to top-level outdir for easy access
-        best_dir = os.path.join(outbase, "best")
-        if os.path.exists(best_dir):
-            shutil.rmtree(best_dir)
-        shutil.copytree(final_dir, best_dir)
+    best_out = os.path.join(outbase, "best")
+    if not success and best_dir is not None:
+        # GoF never reached threshold: keep the best (highest-p) attempt overall.
+        final_dir, final_nsig, final_bf, final_pval = best_dir, best_nsig, best_bf, best_pval
 
+    if final_dir is not None:
+        if os.path.exists(best_out):
+            shutil.rmtree(best_out)
+        shutil.copytree(final_dir, best_out)
         win_min, win_max, _ = compute_window(
-            mass, sigma, n_sigma, args.m_data_min, args.m_data_max, args.bin_frac)
-        print(f"SUCCESS  M={mass} GeV  ±{n_sigma:.1f}σ  p={pval:.4f}")
+            mass, sigma, final_nsig, args.m_data_min, args.m_data_max, final_bf)
+        tag = "SUCCESS" if success else "POOR-GOF (kept)"
+        print(f"{tag}  M={mass} GeV  bin={final_bf:.1f}σ  ±{final_nsig:.1f}σ  p={final_pval:.4f}")
         print(f"  Winning window : [{win_min}, {win_max}] GeV")
-        print(f"  Results        : {best_dir}")
+        print(f"  Results        : {best_out}")
+        if not success:
+            print(f"  NOTE: p < {args.pval_thresh} even at bin={bin_fracs[-1]}σ / "
+                  f"±{args.n_sigma_min:.1f}σ; kept the highest-p attempt and reporting its p-value.")
     else:
-        print(f"FAILURE  M={mass} GeV  could not achieve p >= {args.pval_thresh} "
-              f"at ±{args.n_sigma_min:.1f}σ")
+        print(f"FAILURE  M={mass} GeV  no usable fit produced (all attempts crashed)")
     print("="*60)
 
-    return 0 if success else 1
+    # exit 0 whenever a usable best/ exists (passing OR poor-GoF-but-kept);
+    # exit 1 only if no fit could be produced at all.
+    return 0 if final_dir is not None else 1
 
 
 if __name__ == "__main__":

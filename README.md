@@ -39,7 +39,7 @@ Signal shapes are stored in `.json` files produced by `fit_signalshapes.py`.
 Both `doFit.py` and `fit_signalshapes.py` accept a JSON config file (`-c / --config`) that sets
 all fit parameters. Command-line arguments override config values when both are given.
 
-Example config (`bkg_mc_config.json`):
+Example config (`dimuonX_config.json`):
 
 ```json
 {
@@ -56,13 +56,21 @@ Example config (`bkg_mc_config.json`):
     "ftest_thresh": 0.05,
     "err_thresh":   0.5,
     "func_forms": {
-        "bern":    [2, 3, 4, 5, 6, 7],
-        "polyExp": [1, 2, 3, 4],
-        "exp":     [1, 2, 3, 4, 5],
+        "bern":    [2, 3, 4],
+        "polyExp": [1, 2, 3],
+        "exp":     [1, 2, 3],
         "expPoly": [1, 2, 3, 4]
     }
 }
 ```
+
+`func_forms` lists the polynomial **order** to try for each family, not the number
+of free parameters — the two differ per family (`Utils.get_nPars`): `bern` → order,
+`polyExp` → order+1, `expPoly` → order, `exp` → 2*order-1 (`order` slopes plus
+order-1 coefficients, the last fraction being fixed by normalization). The orders
+above cap every family at 4 free parameters, except `exp` at 5. Allowing too much
+flexibility lets the background absorb genuine signal-like features, so prefer
+capping these rather than adding orders.
 
 Key fields:
 
@@ -122,7 +130,7 @@ This produces one JSON per mass point, e.g. `signal_fits/2G/case_interpolation_M
 
 ```bash
 python3 doFit.py \
-    -c bkg_mc_config.json \
+    -c dimuonX_config.json \
     -M 40 \
     --m-min 34.7 --m-max 45.3 \
     --bin-size 0.166 \
@@ -147,7 +155,7 @@ stopping at ±4σ. The bin size is always set to 0.25σ.
 ```bash
 python3 run_fit_adaptive.py \
     -M 72 \
-    -c bkg_mc_config.json \
+    -c dimuonX_config.json \
     -s signal_fits/2G \
     -o fits/M72/
 ```
@@ -157,7 +165,7 @@ Options:
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-M` | required | Signal mass hypothesis (GeV) |
-| `-c` | `bkg_mc_config.json` | Config file |
+| `-c` | `dimuonX_config.json` | Config file |
 | `-s` | `signal_fits/2G` | Directory containing `case_interpolation_M{mass}.json` |
 | `-o` | `bkg_mc_fits/M{mass}` | Output directory |
 | `--pval-thresh` | `0.05` | Minimum acceptable s+b chi² p-value |

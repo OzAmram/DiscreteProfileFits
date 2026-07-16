@@ -12,9 +12,9 @@
     "ftest_thresh": 0.05,
     "err_thresh": 0.5,
     "func_forms": {
-        "bern":    [2, 3, 4, 5, 6, 7],
-        "polyExp": [1, 2, 3, 4],
-        "exp":     [1, 2, 3, 4, 5],
+        "bern":    [2, 3, 4],
+        "polyExp": [1, 2, 3],
+        "exp":     [1, 2, 3],
         "expPoly": [1, 2, 3, 4]
     }
 }

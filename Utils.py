@@ -16,9 +16,15 @@ def get_nPars(order, func_form):
     if func_form == 'bern':
         return order
     if func_form == 'exp':
-        return 2*order
+        # `order` slopes but only order-1 coefficients: the last fraction is
+        # fixed by normalization (recursive RooAddPdf), so it is not free.
+        return 2*order - 1
     if func_form == 'polyExp':
         return order + 1
+    if func_form == 'expPoly':
+        # expPolyShape builds exactly `order` polynomial coefficients (no extra
+        # normalization parameter -- the RooGenericPdf self-normalizes).
+        return order
     if func_form == 'bernPower':
         return order + 1
 
@@ -449,16 +455,25 @@ def fill_hist(v, h, event_num = None):
     #h.Print("range")
 
 
+def _read_masses(f):
+    # Accept either dataset key: 'masses' (our convention) or 'mass' (the
+    # collaborator's anomaly-cut h5 files) so inputs can be fit directly.
+    for key in ('masses', 'mass'):
+        if key in f:
+            return np.array(f[key][()])
+    raise KeyError("no 'masses' or 'mass' dataset in %s" % f.filename)
+
+
 def get_masses_max(h_file):
     with h5py.File(h_file, "r") as f:
-        masses = np.array(f['masses'][()])
+        masses = _read_masses(f)
         return np.amax(masses)
 
 
 def load_h5_sb(h_file, hist, correctStats=False, xmin=-1.0, xmax=-1.0):
     event_num = None
     with h5py.File(h_file, "r") as f:
-        masses = np.array(f['masses'][()])
+        masses = _read_masses(f)
         if(correctStats):
             event_num = f['event_num'][()]
 
@@ -469,7 +484,7 @@ def load_h5_sb(h_file, hist, correctStats=False, xmin=-1.0, xmax=-1.0):
 def load_h5_bkg(h_file, hist, correctStats = False):
     event_num = None
     with h5py.File(h_file, "r") as f:
-        masses = f['masses'][()]
+        masses = _read_masses(f)
         is_sig = f['truth_label'][()]
         if(correctStats):
             event_num = f['event_num'][()]
@@ -482,7 +497,7 @@ def load_h5_bkg(h_file, hist, correctStats = False):
 def get_sig_in_window(h_file, m_low, m_high):
     with h5py.File(h_file, "r") as f:
         if('truth_label' in f.keys()):
-            masses = f['masses'][()]
+            masses = _read_masses(f)
             is_sig = f['truth_label'][()].reshape(-1)
         else:
             return 0
@@ -498,7 +513,7 @@ def get_sig_in_window(h_file, m_low, m_high):
 def check_rough_sig(h_file, m_low, m_high):
     with h5py.File(h_file, "r") as f:
         if('truth_label' in f.keys()):
-            masses = f['masses'][()]
+            masses = _read_masses(f)
             is_sig = f['truth_label'][()].reshape(-1)
         else:
             return

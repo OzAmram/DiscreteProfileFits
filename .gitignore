@@ -9,13 +9,45 @@ __pycache__/
 cache*.root
 fitresults.root
 
-# Study / fit result artifacts: kept locally, not tracked (tens of thousands of
-# per-fit .json/.png/.log files). Only the code that produces them is versioned.
-/studies/bias_validation/
-/studies/bkg_mc_validation/
-/studies/config_scan/
+# ---------------------------------------------------------------------------
+# This repo tracks ONLY the general fitting framework:
+#   Fitter.py  DataCardMaker.py  Utils.py  doFit.py  fit_signalshapes.py
+#   interpolation.py  makePostfitPlot.py  run_fit_adaptive.py
+#   CMS_lumi.py  tdrstyle.py  dimuonX_config.json (example config)
+#
+# Everything below is a particular APPLICATION of the framework (the dimuon
+# search: its automation, one-off validation tooling, and outputs). It is kept
+# locally but deliberately not tracked, so the repo stays general.
+# ---------------------------------------------------------------------------
+
+# One-off / study tooling and archived study results
+/tools/
+/studies/
+
+# Dimuon data control-region scan automation
+/build_scan_plan.py
+/run_data_scan.py
+/summarize_data_scan.py
+/scan_plan.json
+/data_scan_summary.json
+/data_scan_run.log
+
+# UAF signal-model prep
+/prep_signal_uaf.py
+/run_signal_fits_uaf.py
+/signal_uaf_manifest.json
+
+# Application-specific configs, plots and writeups
+/samesign_dimuon_config.json
+/plot_signal_shape_overlay.py
+/signal_shape_overlay.png
+/fitting.tex
+
+# Fit / study output directories (tens of thousands of per-fit .json/.png/.log)
 /data_fits/
-/data_spectra/
+/data_fits_separate_v2/
+/ensemble_capped_adaptive/
+/ensemble_sb_capped_adaptive/
 /signal_fits/
 /signal_fits_uaf/
 /signal_comparison/

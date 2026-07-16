@@ -98,8 +98,6 @@ def dofit(options):
             print("Trying %i parameter background fit" % order)
             bkg_fnames[i] = plot_dir + func_form + "_" + str(order) + 'par_bkg_fit%i.json' % i
 
-            nPars = get_nPars(order, func_form)
-
             model_name = "model_b" + str(i)
             fitter_bkg = Fitter(['m_fine'], debug = False, outdir=plot_dir)
             # Ensure the scratch cache is always removed, even if the fit raises.

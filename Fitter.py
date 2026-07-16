@@ -406,7 +406,10 @@ class Fitter(object):
         self.legend = self.getLegend()
         self.legend.AddEntry( self.w.pdf(model)," Full PDF","l")
 
-        self.c=ROOT.TCanvas("c","c")
+        # Unique name per canvas: reusing "c" makes ROOT auto-delete the
+        # previous same-named canvas, which can use-after-free and segfault
+        # after many projection() calls in one process (crashed M19.6/M26.2).
+        self.c=ROOT.TCanvas("c_%i" % random.randint(0, 1000000000),"c")
         if logy:
             self.frame.SetMinimum(1)
             self.frame.SetMaximum(1e+7)
