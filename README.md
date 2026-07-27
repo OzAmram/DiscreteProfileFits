@@ -7,6 +7,19 @@ The data is then fit with the various choices of functional forms describing the
 For each functional form an F-test is performed to select the optimal number of parameters.
 Then, a signal plus background fit is performed using Combine. Discrete profiling is used to include all functional forms, each with their determined optimal number of parameters.
 
+## Repository layout
+
+This repo tracks **only the general fitting framework**: `Fitter.py`,
+`DataCardMaker.py`, `Utils.py`, `doFit.py`, `fit_signalshapes.py`,
+`interpolation.py`, `makePostfitPlot.py`, `run_fit_adaptive.py`, `CMS_lumi.py`,
+`tdrstyle.py`, and `dimuonX_config.json` as a worked example config.
+
+Particular applications of the framework (a specific search's automation,
+one-off validation tooling, signal shapes, the analysis note, etc.) live under
+`analyses/<name>/`, each self-contained with its own `.gitignore` for its own
+bulk outputs. See [`analyses/dimuonX/README.md`](analyses/dimuonX/README.md)
+for the dimuon resonance search, the framework's reference application.
+
 ## Installation
 
 This framework relies on Combine. Follow the latest recommendations at https://cms-analysis.github.io/HiggsAnalysis-CombinedLimit/latest/#within-cmssw-recommended-for-cms-users
@@ -166,7 +179,7 @@ Options:
 |------|---------|-------------|
 | `-M` | required | Signal mass hypothesis (GeV) |
 | `-c` | `dimuonX_config.json` | Config file |
-| `-s` | `signal_fits/2G` | Directory containing `case_interpolation_M{mass}.json` |
+| `-s` | required | Directory containing `case_interpolation_M{mass}.json` |
 | `-o` | `bkg_mc_fits/M{mass}` | Output directory |
 | `--pval-thresh` | `0.05` | Minimum acceptable s+b chi² p-value |
 | `--n-sigma-start` | `8.0` | Starting half-width in σ units |
