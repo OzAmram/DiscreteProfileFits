@@ -1,0 +1,45 @@
+# This directory is the dimuon resonance search analysis: automation, one-off
+# validation tooling, the note, and the chosen benchmark's signal shapes are
+# tracked. Everything below is bulk output / raw data, regenerable from the
+# tracked code, and kept locally only.
+#
+# (*.root, *.h5, __pycache__/ etc. are already ignored repo-wide by the parent
+# .gitignore; this file only adds directory- and log-level rules specific to
+# this analysis.)
+
+*.log
+
+# Bulk per-fit scan/study outputs (hundreds of MB, fully regenerable)
+/data_fits/
+/data_fits_separate_v2/
+/ensemble_*/
+/bias_toys*/
+/sr_bkgmc_v3_fits/
+/vr_v4_fits/
+/shape_mismatch_test/
+/signal_comparison/
+/signal_comparison_loosemass/
+/signal_loo_interp/
+/studies/
+
+# Raw signal/background MC and signal-model productions (regenerable from the
+# raw MC on EOS via the tracked prep/fit/interpolation scripts). Only the
+# chosen benchmark's interpolated shapes are tracked, via the exception below.
+/signal_data/
+/signal_data_loosemass/
+/signal_data_uaf/
+/signal_fits_loosemass/
+/signal_fits_uaf/
+/signal_fits/*
+!/signal_fits/2B_loosemass/
+/signal_fits/2B_loosemass/*
+!/signal_fits/2B_loosemass/*.json
+
+# Stale output artifacts from the pre-reorganization v1 grid; regenerate via
+# build_scan_plan.py / run_data_scan.py instead of tracking these directly.
+/scan_plan.json
+/data_scan_summary.json
+/datacardInputs_mass_test.root
+
+# Stale duplicate of note/fitting.tex from before the note was organized.
+/fitting.tex

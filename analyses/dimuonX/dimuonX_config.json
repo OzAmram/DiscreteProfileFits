@@ -1,0 +1,20 @@
+{
+    "inputFile": "bkg_mc_masses.h5",
+    "m_min": 30.0,
+    "m_max": 36.1,
+    "bin_size": 0.05,
+    "dcb_model": true,
+    "sqrts": "13.6",
+    "lumi": "",
+    "scale_j_unc": 0.01,
+    "res_j_unc": 0.035,
+    "sig_norm": 100.0,
+    "ftest_thresh": 0.05,
+    "err_thresh": 0.5,
+    "func_forms": {
+        "bern":    [2, 3, 4],
+        "polyExp": [1, 2, 3],
+        "exp":     [1, 2, 3],
+        "expPoly": [1, 2, 3, 4]
+    }
+}

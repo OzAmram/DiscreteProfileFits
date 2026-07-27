@@ -561,7 +561,24 @@ def get_rebinning(binsx, histos_sb, min_count = 5):
 
 
 def f_test(nParams, nDof, chi2, fit_errs, thresh = 0.05, err_thresh = 0.5):
-    #assumes arrays are in increasing number of params order (ie nParams[0] is minimum number of params)
+    """Sequentially pick the lowest order the data actually demands.
+
+    Assumes arrays are in increasing order (nParams[0] is the minimum).
+
+    The test is SEQUENTIAL: each order is compared against the current best, and
+    the scan STOPS at the first order that is not preferred. It does not keep
+    testing every remaining order against the current best. Doing so used to let
+    a rejected step be bypassed -- e.g. order 1 vs 2 rejected (p=0.98), then a
+    direct order 1 vs 3 comparison accepted (p=0.03), landing on order 3 even
+    though order 2 was not warranted. That both contradicts the documented
+    procedure and inflates the false-accept rate, since every extra order is
+    another comparison at the same threshold.
+
+    Note: doFit currently passes fit_errs = all zeros ("Deprecated"), so both
+    err_thresh guards below are inert -- the first always takes the accept
+    branch and the second never fires. They are kept for when fit_errs is
+    populated again.
+    """
     print("\n\n #################### STARTING F TEST #######################" )
     best_i = 0
     for i in range(1, len(nParams)):
@@ -585,11 +602,17 @@ def f_test(nParams, nDof, chi2, fit_errs, thresh = 0.05, err_thresh = 0.5):
             if(fit_errs[i] <  err_thresh or fit_errs[i] < fit_errs[best_i]):
                 print("Prob below threshold, switching to %i parameters" % nParams[i])
                 best_i = i
+                continue
             else:
                 print("Prob below threshold, but largest param error is too large(%.2f) so NOT adding parameters" % fit_errs[i])
+                break
 
         elif(fit_errs[best_i]  > err_thresh and fit_errs[i] < err_thresh):
                 print("Prob not below threshold but previous best was above error threshold, so switch to %i params" % nParams[i])
                 best_i = i
+                continue
+
+        print("Prob not below threshold, stopping at %i params" % nParams[best_i])
+        break
 
     return best_i

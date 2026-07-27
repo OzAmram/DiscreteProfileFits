@@ -12,6 +12,9 @@ import shutil
 import subprocess
 import sys
 
+# doFit.py is always a sibling of this file, regardless of the caller's cwd.
+DOFIT_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "doFit.py")
+
 
 def get_sigma(sig_dir, mass):
     sig_json = os.path.join(sig_dir, f"case_interpolation_M{float(mass)}.json")
@@ -36,7 +39,7 @@ def run_fit(mass, m_min, m_max, bin_size, config, sig_json, outdir, input_file=N
     os.makedirs(outdir, exist_ok=True)
 
     cmd = [
-        sys.executable, "doFit.py",
+        sys.executable, DOFIT_PY,
         "-c", config,
         "-M", str(mass),
         "--m-min",    str(m_min),
@@ -78,7 +81,7 @@ def main():
                         help="Signal mass hypothesis (GeV)")
     parser.add_argument("-c", "--config", default="dimuonX_config.json",
                         help="JSON config file")
-    parser.add_argument("-s", "--sig-dir", default="signal_fits/2G",
+    parser.add_argument("-s", "--sig-dir", required=True,
                         help="Directory containing case_interpolation_M{mass}.json files")
     parser.add_argument("-o", "--outdir", default=None,
                         help="Output directory (default: bkg_mc_fits/M{mass})")

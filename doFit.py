@@ -12,6 +12,11 @@ from array import array
 from fit_signalshapes import  fit_signalmodel
 from makePostfitPlot import make_postfit_plot
 
+# signal-strength range passed to combine's FitDiagnostics/AsymptoticLimits below;
+# also used to recognize a MINOS error that hit this wall rather than a real crossing.
+R_MIN = -5
+R_MAX = 10
+
 def dofit(options):
 
     label = options.label
@@ -174,9 +179,9 @@ def dofit(options):
     cmd = (
         " cd {plot_dir} ; "
         + "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root; "
-        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace --rMin -5 --rMax 10; "
-        + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} --rMax 10; "
-        ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label)
+        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace --rMin {rmin} --rMax {rmax}; "
+        + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} --rMax {rmax}; "
+        ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label, rmin=R_MIN, rmax=R_MAX)
     print(cmd)
     os.system(cmd)
     workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
@@ -197,11 +202,26 @@ def dofit(options):
     sig_strength_unc = params_sb.rErr
     # robustFit + cminDefaultMinimizerStrategy 0 can leave the symmetric rErr at 0;
     # fall back to the MINOS errors (rLoErr/rHiErr) which combine still computes.
+    # A MINOS scan that never crosses the 1-sigma NLL threshold before hitting the
+    # r range wall (R_MIN/R_MAX) reports the distance to that wall instead, which is
+    # not a real uncertainty (seen when the likelihood is essentially flat in that
+    # direction -- background can absorb a large signal-strength shift there). Drop
+    # any wall-pinned side from the fallback rather than averaging in that artifact.
     try:
         rlo = abs(params_sb.rLoErr)
         rhi = abs(params_sb.rHiErr)
-        if sig_strength_unc <= 0 and (rlo > 0 or rhi > 0):
-            sig_strength_unc = 0.5 * (rlo + rhi)
+        eps = 1e-3
+        lo_at_wall = rlo > 0 and abs((sig_strength - rlo) - R_MIN) < eps
+        hi_at_wall = rhi > 0 and abs((sig_strength + rhi) - R_MAX) < eps
+        if sig_strength_unc <= 0:
+            if lo_at_wall and hi_at_wall:
+                sig_strength_unc = -1.0  # both sides degenerate: uncertainty undefined
+            elif lo_at_wall:
+                sig_strength_unc = rhi
+            elif hi_at_wall:
+                sig_strength_unc = rlo
+            elif rlo > 0 or rhi > 0:
+                sig_strength_unc = 0.5 * (rlo + rhi)
     except Exception:
         pass
     nll_sb = params_sb.nll_min
@@ -279,7 +299,8 @@ def dofit(options):
     results['func_forms'] = func_forms
     results['final_func_forms'] = final_func_forms
     results['obs_excess_events'] = sig_strength*sig_norm
-    results['obs_excess_events_unc'] = sig_strength_unc*sig_norm
+    results['obs_excess_events_unc'] = (-1.0 if sig_strength_unc == -1.0
+                                         else sig_strength_unc*sig_norm)
     results['obs_lim_events'] = obs_limit*sig_norm
     results['exp_lim_events'] = exp_limit*sig_norm
     results['exp_lim_1sig_low'] = exp_low * sig_norm
