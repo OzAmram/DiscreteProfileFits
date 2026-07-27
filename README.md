@@ -27,8 +27,8 @@ This framework relies on Combine. Follow the latest recommendations at https://c
 The instructions for the current recommended version (v10.4.2) are:
 
 ```bash
-cmsrel CMSSW_14_1_0_pre4
-cd CMSSW_14_1_0_pre4/src
+cmsrel CMSSW_14_1_8
+cd CMSSW_14_1_8/src
 cmsenv
 git -c advice.detachedHead=false clone --depth 1 --branch v10.4.2 \
     https://github.com/cms-analysis/HiggsAnalysis-CombinedLimit.git HiggsAnalysis/CombinedLimit
@@ -43,7 +43,8 @@ git clone git@github.com:OzAmram/DiscreteProfileFits.git
 
 ## Inputs
 
-Input files containing masses to be fit must be HDF5 files with a single dataset called `masses`.
+Input files containing masses to be fit must be HDF5 files with a single dataset,
+named either `masses` or `mass`.
 
 Signal shapes are stored in `.json` files produced by `fit_signalshapes.py`.
 
@@ -89,13 +90,13 @@ Key fields:
 
 | Field | Description |
 |-------|-------------|
-| `inputFile` | HDF5 file with a `masses` dataset |
+| `inputFile` | HDF5 file with a `masses` (or `mass`) dataset |
 | `m_min`, `m_max` | Fit window boundaries (GeV) |
 | `bin_size` | Histogram bin width (GeV). A good rule of thumb is `0.25 × σ_signal` |
 | `dcb_model` | Use double crystal-ball signal model (recommended) |
 | `sig_norm` | Signal yield corresponding to signal strength `r = 1` |
 | `ftest_thresh` | p-value threshold for the F-test to prefer a higher-order function |
-| `err_thresh` | Fractional fit-error threshold; models with large errors are excluded from F-test |
+| `err_thresh` | Fractional fit-error threshold; models with large errors are excluded from F-test. Currently inert — `doFit.py` doesn't populate per-order fit errors, so this guard never fires; kept for when that's restored |
 | `func_forms` | Dict mapping functional-form name → list of orders to try. Available forms: `bern` (Bernstein polynomial), `exp` (sum of exponentials), `polyExp` (polynomial × exponential), `expPoly` (exponential of a polynomial) |
 
 ## Available background functional forms
@@ -139,6 +140,10 @@ python3 interpolation.py \
 
 This produces one JSON per mass point, e.g. `signal_fits/2G/case_interpolation_M40.0.json`.
 
+Use `--fit-mass-min`/`--fit-mass-max` to exclude `sig_fit_*.json` points outside a
+mass range from the parameterization (e.g. when the highest generated masses
+sit on a kinematic edge and are poorly constrained) without deleting them.
+
 ## Running a single fit
 
 ```bash
@@ -161,9 +166,14 @@ Results and postfit plots are saved in the output directory. The JSON
 
 ## Adaptive fit wrapper
 
-`run_fit_adaptive.py` automates window-size selection. It starts at ±8σ and shrinks
-the window by 0.5σ per side if the s+b postfit chi²  p-value is below threshold,
-stopping at ±4σ. The bin size is always set to 0.25σ.
+`run_fit_adaptive.py` automates window-size and bin-size selection. It starts at
+±8σ and 0.25σ bins; if the s+b postfit chi² p-value is below threshold, it
+shrinks the window down to ±4σ (0.5σ steps). If no window size passes at the
+starting bin fraction, it coarsens the bin size (0.1σ steps, up to 1.0σ by
+default) and repeats the window scan at each — coarser bins are less sensitive
+to a narrow statistical fluctuation landing in one bin. If nothing passes
+outright, it falls back to the highest-p attempt across the whole (bin size,
+window) grid rather than dropping the mass point.
 
 ```bash
 python3 run_fit_adaptive.py \
@@ -181,11 +191,17 @@ Options:
 | `-c` | `dimuonX_config.json` | Config file |
 | `-s` | required | Directory containing `case_interpolation_M{mass}.json` |
 | `-o` | `bkg_mc_fits/M{mass}` | Output directory |
+| `-i` | config's `inputFile` | Override the input h5 file (e.g. a mock signal-injected dataset) |
 | `--pval-thresh` | `0.05` | Minimum acceptable s+b chi² p-value |
 | `--n-sigma-start` | `8.0` | Starting half-width in σ units |
 | `--n-sigma-min` | `4.0` | Minimum half-width before declaring failure |
 | `--n-sigma-step` | `0.5` | Step size for shrinking the window |
+| `--bin-frac` | `0.25` | Starting bin size as a fraction of σ |
+| `--bin-frac-max` | `1.0` | Max bin size (in σ) to escalate to if every window fails at the starting bin size |
+| `--bin-frac-step` | `0.1` | Bin-size escalation step, in σ |
+| `--m-data-min` | none | Floor the fit window at this mass (data lower edge) |
+| `--m-data-max` | none | Cap the fit window at this mass (data upper edge) |
 
-Each attempted window size is saved in a subdirectory `window_{N}sig/` for review.
-The best passing attempt is copied to `best/`. The script exits with code 0 on success
-and 1 on failure.
+Each attempted (bin size, window size) combination is saved in a subdirectory
+`bin{f}_window{N}sig/` for review. The best passing attempt is copied to
+`best/`. The script exits with code 0 on success and 1 on failure.

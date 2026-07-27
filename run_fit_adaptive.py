@@ -1,9 +1,12 @@
 """
 Adaptive-window fit wrapper.
 
-Fits a single mass hypothesis starting with a ±8σ window and 0.25σ bin size.
-If the s+b postfit chi2 p-value is below threshold, shrinks the window by
-0.5σ on each side and retries. Gives up and reports failure at ±4σ.
+Fits a single mass hypothesis starting with a +/-8sigma window and 0.25sigma
+bin size. If the s+b postfit chi2 p-value is below threshold, shrinks the
+window down to +/-4sigma (0.5sigma steps). If no window size at the starting
+bin fraction passes, coarsens the bin size (0.1sigma steps, up to 1.0sigma by
+default) and repeats the window scan at each. Reports the highest-p attempt
+across the whole (bin size, window) grid if nothing passes outright.
 """
 import argparse
 import json

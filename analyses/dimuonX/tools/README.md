@@ -1,20 +1,20 @@
 # tools/
 
 One-off scripts used to build, validate, and plot the studies referenced in
-the note (and the archived ones under `studies/`). These are **not** part of
-the core fitting framework (that lives two directories up, at the repo root:
+the note. These are **not** part of the core fitting framework (that lives
+two directories up, at the repo root:
 `Fitter.py`, `DataCardMaker.py`, `Utils.py`, `doFit.py`, `fit_signalshapes.py`,
 `interpolation.py`, `makePostfitPlot.py`, `run_fit_adaptive.py`).
 
 **Run them from `analyses/dimuonX/`** (the parent of this directory), e.g.
 `python3 tools/bias_test.py`, not from inside `tools/`. They read/write data
-(`signal_fits/`, `bkg_mc_masses.h5`, `dimuonX_config.json`, output dirs, ...)
+(`signal_fits/`, `dimuonX_config.json`, background MC, output dirs, ...)
 relative to that directory. The framework scripts they shell out to
 (`doFit.py`, `run_fit_adaptive.py`, `interpolation.py`, `fit_signalshapes.py`)
 are located via a `FRAMEWORK_DIR` computed from `__file__`, so those calls
 work regardless of cwd — only the *data* paths need the right cwd.
 
-## Bias / spurious-signal validation (→ studies/bias_validation, note §"Validation of the Fit Procedure")
+## Bias / spurious-signal validation (note §"Validation of the Fit Procedure")
 - `bias_test.py` — single-fit signal-injection bias test.
 - `bias_test_toys.py` — the current bias test: combine-generated smooth-truth
   toys (fit the full background at high stats, generate `GenerateOnly` toys
@@ -36,14 +36,14 @@ work regardless of cwd — only the *data* paths need the right cwd.
 
 ## Note figures
 - `make_note_figures.py` — builds the Fitting-section figures that come
-  directly from `signal_fits/2B_loosemass/` and the ensemble outputs
+  directly from `signal_fits/2B_loosemass/` and the GoF ensemble output
   (`interp_params_vs_mass.png`, `gof_ensemble.png`) into `note/Figures/8Systematics_figures/Fitting/`.
 - `test_interpolation_closure.py` — leave-one-mass-out interpolation closure
   test; produces `note/Figures/8Systematics_figures/Fitting/closure_test_M{mass}.png`.
 
 ## Old signal-shape pipeline (superseded by prep_signal_loosemass.py / run_signal_fits_loosemass.py)
 - `extract_signal_masses.py` — extract dimuon mass from signal ROOT files to h5.
-- `compare_signal_shapes.py` — overlay 2B/2G/Inv fitted DCB params vs mass (→ signal_comparison/).
+- `compare_signal_shapes.py` — overlay 2B/2G/Inv fitted DCB params vs mass.
 - `draw_signals.py` — legacy Python-2 signal drawing script (does not run under python3; kept for reference).
 
 ## Misc
