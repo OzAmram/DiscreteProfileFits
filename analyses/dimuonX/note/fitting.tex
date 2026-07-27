@@ -16,8 +16,10 @@ As the selection made by the anomaly detection algorithm is not known a priori (
 To accomplish this we use discrete profiling methodology with a large family of functional forms to capture different distributions.
 
 The exact shape of the signal resonance may vary in different models, in particular those which have varying resonance width.
-However for a narrow width signal the width of the observed resonance will be dictated only by the experimental resolution on the di-muon mass rather than the specific signal properties.
-We therefore use the signal shape obtained from a fit to a chosen narrow width signal as a generic 'narrow width' shape which can be employed for the search.
+As we are performing a model independent search, we do not know the target width a priori. 
+We still need a candidate width to use for our bump search, which should retain sensitivity to main different signals. 
+We use the shapes derived from our $T'$ signal, which is found to have minimal sensitivity loss ($\leq 0.5 \sigma$) when fitting datasets with other signals.
+We study this effect across our set of benchmark signal models in Appendix \ref{app:shape_mismatch}.
 
 \thesis{\subsection{Signal Shape Modeling}}
 \note{\subsubsection{Signal Shape Modeling}}
@@ -231,7 +233,7 @@ An example fit is shown in Fig.~\ref{fig:example_dimuon_fit}.
 \label{sec:fit_validation}
 
 The fit procedure is validated on simulated background.
-Since we do not know the exact mass shapes after the application of the anomaly score, we first do tests on the background 
+Since we do not know the exact mass shapes after the application of the anomaly score on data, we first do tests on the background 
 distribution prior to the anomaly score cut, ie assuming the mass shape is unchanged by the anomaly score cut. 
 Because the search applies an anomaly score selection with an efficiency of approximately 1\% before the
 mass fit, and we have approximately 3 times more data than MC events, the validation is performed on random 3\% subsamples of the MC.
@@ -286,13 +288,8 @@ every injected signal strength, comfortably within the conventional acceptance c
 $|\mathrm{median\ pull}| < 0.5$, and no additional systematic uncertainty for the choice of background
 functional form is required in this range.
 
-At 75\GeV a coherent negative offset is observed, with a median pull between $-0.63$ and $-0.27$; all
-twelve configurations at this mass are negative and one of them, toys generated from a polynomial times an
-exponential with a five standard deviation signal injected, exceeds the acceptance criterion.
-This is the highest mass considered, where the nominal $\pm 7\sigma$ window extends beyond the upper edge
-of the available mass range and is truncated at 80\GeV, leaving sideband on only one side of the
-resonance and reducing the constraint on the background shape.
-The behaviour of the fit at the upper edge of the search range is under study.
+At 75\GeV a small coherent negative offset is observed, with a median pull between $-0.63$ and $-0.27$.
+We are investigating if this related to edge effects of our fitting range (80 \GeV).
 
 \begin{figure}[h!]
     \centering
@@ -310,10 +307,13 @@ The behaviour of the fit at the upper edge of the search range is under study.
 \subsubsection{Full-Range Scan on the Post-Selection Signal-Region Simulation}
 \label{sec:srmc_scan}
 
-The tests above use background simulation prior to the anomaly score selection, since the mass shape after the cut was not characterized at the time they were designed.
-This is now repeated using simulated signal-region background processed through the actual CATHODE pipeline -- the same generative model, classifier, and anomaly selection used on data -- providing the closest available proxy of the real analysis chain.
+The tests above use background simulation prior to the anomaly score selection, since the exact mass shape on data after the anomaly score cut is unknown a priori.
+This demonstrates the fitting framework can handle the background shape if there is no sculpting.
+However it is important to verify that the anomaly score cut indeed does not cause any sculpting. 
+This is checked by running the full procedure on simulated signal-region background processed through the actual CATHODE pipeline -- the same generative model, classifier, and anomaly selection used on data -- providing the closest available proxy of the real analysis chain.
 The bump-hunt fit is performed at 97 mass hypotheses between 13.8 and 75.0\GeV, distributed over 19 mass windows.
-A narrow band, 47.5--52.5\GeV, is excluded from the scan: the current background simulation sample is deficient in this region, a known issue with the simulation unrelated to the analysis method, and every mass hypothesis whose nominal $\pm7\sigma$ fit window would overlap it is dropped.
+A narrow band, 47.5--52.5\GeV, is excluded from the scan: this is the region in which the mass-binned Drell-Yan samples change boundary, and we found that our procedure was sensitive to artifacts related to the difference between these two different Drell-Yan samples, leading to strange effects right at this 50 \GeV boundary. 
+We therefore exlcude this region, every mass hypothesis whose nominal $\pm7\sigma$ fit window would overlap it is dropped.
 
 The background-only goodness of fit is summarized in Fig.~\ref{fig:srmc_bkg_gof}, alongside the goodness of fit of the signal-plus-background fit actually used to extract the result.
 Across the 97 fits the mean background-only $p$-value is 0.48 and the median $\chi^2/\mathrm{ndof}$ is 1.01, consistent with an adequate background description.
