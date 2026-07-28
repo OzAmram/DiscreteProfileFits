@@ -78,10 +78,14 @@ def main():
     parser.add_argument("--fit-mass-max", type=float, default=75.0,
                         help="Cap training fit points at this mass (match production interpolation)")
     parser.add_argument("--out", default="signal_comparison/closure_test_M{mass}.png")
+    parser.add_argument("--fit-dir", default=None,
+                        help="Override signal_fits/<variant>/ directory (e.g. a signal_fits_loosemass/<group>/ dir)")
+    parser.add_argument("--data-h5", default=None,
+                        help="Override the input h5 file (default signal_data/<variant>/signal_mass_<mass>.h5)")
     args = parser.parse_args()
 
-    fit_dir = f"signal_fits/{args.variant}/"
-    data_h5 = f"signal_data/{args.variant}/signal_mass_{args.exclude_mass}.h5"
+    fit_dir = args.fit_dir or f"signal_fits/{args.variant}/"
+    data_h5 = args.data_h5 or f"signal_data/{args.variant}/signal_mass_{args.exclude_mass}.h5"
     true_json = os.path.join(fit_dir, f"sig_fit_{args.exclude_mass}.json")
     mass = args.exclude_mass
     out_png = args.out.format(mass=mass)

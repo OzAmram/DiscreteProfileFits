@@ -26,7 +26,7 @@ parser.add_argument("--plot", default = False, action = 'store_true', help="draw
 args = parser.parse_args()
 ### use same settings as in diboson search
 all_graphs = {"graviton" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2:pol2,sign2:pol2"}
-all_graphs = {"case" : "mean:spline,sigma:spline,alpha:pol1,sign:pol1,alpha2:pol1,sign2:pol1"}
+all_graphs = {"case" : "mean:spline,sigma:spline,alpha:pol2,sign:pol2,alpha2:pol2,sign2:pol2"}
 
 
 def build_graphs_from_json(json_dir, parameters, mass_min=None, mass_max=None):
