@@ -179,9 +179,11 @@ def dofit(options):
     cmd = (
         " cd {plot_dir} ; "
         + "text2workspace.py datacard_mass_{l2}.txt -o workspace_{l1}_{l2}.root; "
-        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy 0 --saveWorkspace --rMin {rmin} --rMax {rmax}; "
+        + "combine -M FitDiagnostics workspace_{l1}_{l2}.root -m {mass} -n _{l1}_{l2} --robustFit 1 --cminDefaultMinimizerStrategy {strat} --saveWorkspace --rMin {rmin} --rMax {rmax} {extra}; "
         + "combine -M AsymptoticLimits workspace_{l1}_{l2}.root -m {mass} -n lim_{l1}_{l2} --rMax {rmax}; "
-        ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label, rmin=R_MIN, rmax=R_MAX)
+        ).format(plot_dir=plot_dir, mass=mass, l1=label, l2=fit_label, rmin=R_MIN, rmax=R_MAX,
+                 strat=getattr(options, "min_strategy", 0),
+                 extra=getattr(options, "combine_extra", "") or "")
     print(cmd)
     os.system(cmd)
     workspace_name = 'workspace_{l1}_{l2}.root'.format(l1=label, l2=fit_label)
@@ -247,8 +249,15 @@ def dofit(options):
 
 
 
-    true_sig_strength = get_sig_in_window(options.inputFile, binsx[0], binsx[-1]) /  sig_norm
-    print("True sig strength %.3f" % true_sig_strength)
+    # Count over the actual fit range, not binsx[0]..binsx[-1]: np.arange stops one
+    # bin short of m_max (39.8 for [30, 40] in 0.2 bins) while the histogram's last
+    # bin does extend to m_max, so the old bounds undercounted the truth signal and
+    # made true_sig_strength come out slightly below the value it is normalised to.
+    n_sig_true_in_window = get_sig_in_window(options.inputFile,
+                                             options.m_min, options.m_max)
+    true_sig_strength = n_sig_true_in_window /  sig_norm
+    print("True sig strength %.3f (%i truth signal events in [%.2f, %.2f])"
+          % (true_sig_strength, n_sig_true_in_window, options.m_min, options.m_max))
 
     #expected significance TODO
     exp_signif = 0.5
@@ -293,11 +302,28 @@ def dofit(options):
 
     # bkg fit results
     results['signif'] = signif
+    # signif is unsigned (delta_ll is clipped at 0), so a downward fluctuation
+    # reads as an excess.  Carry the sign of the fitted yield alongside it, the
+    # same convention as summarize_data_scan.py's data scan.
+    results['signif_signed'] = signif * (1.0 if sig_strength >= 0 else -1.0)
     results['asimov_signif'] = exp_signif
     results['asimov_pval'] = exp_pval
     results['pval'] = pval
     results['func_forms'] = func_forms
     results['final_func_forms'] = final_func_forms
+    results['sig_strength'] = sig_strength
+    results['sig_strength_unc'] = sig_strength_unc
+    results['sig_norm'] = sig_norm
+    # Closure quantities: r_true is what the fit should recover if the chain is
+    # unbiased.  Both are 0 when the input h5 carries no truth_label dataset.
+    results['true_sig_strength'] = true_sig_strength
+    results['n_sig_true_in_window'] = int(n_sig_true_in_window)
+    # r pinned at the R_MIN/R_MAX wall is a bound, not a measurement -- flag it so
+    # downstream summaries can refuse to quote the number.
+    results['r_at_bound'] = bool(abs(sig_strength - R_MAX) < 1e-3
+                                 or abs(sig_strength - R_MIN) < 1e-3)
+    results['r_min'] = R_MIN
+    results['r_max'] = R_MAX
     results['obs_excess_events'] = sig_strength*sig_norm
     results['obs_excess_events_unc'] = (-1.0 if sig_strength_unc == -1.0
                                          else sig_strength_unc*sig_norm)
@@ -401,6 +427,22 @@ def fitting_options():
                       help="Luminosity string for plot label, e.g. '27.0 fb^{-1}'")
     parser.add_option("--sqrts", dest="sqrts", default="13.6",
                       help="Centre-of-mass energy label (TeV)")
+    # Strategy 0 is fast and fine for most points, but on a large injected signal
+    # it can end with a non-positive-definite covariance ("MnPosDef ... non-positive
+    # diagonal element"), after which combine reports "Fit failed", writes no fit_s
+    # to fitDiagnostics, and leaves rErr AND the MINOS errors at 0. The postfit chi2
+    # is then computed from pre-fit shape parameters and is meaningless. Raising the
+    # strategy costs time but recomputes the Hessian properly. Default unchanged.
+    parser.add_option("--min-strategy", dest="min_strategy", type=int, default=0,
+                      help="combine --cminDefaultMinimizerStrategy (0, 1 or 2). "
+                           "Raise to 1/2 if the S+B fit fails with a non-positive-"
+                           "definite covariance matrix.")
+    # Escape hatch for envelope (RooMultiPdf) convergence failures, e.g.
+    # --combine-extra="--cminRunAllDiscreteCombinations". Appended to the
+    # FitDiagnostics call only; empty by default so nothing else changes.
+    parser.add_option("--combine-extra", dest="combine_extra", default="",
+                      help="Extra options appended verbatim to the combine "
+                           "FitDiagnostics command.")
     return parser
 
 
