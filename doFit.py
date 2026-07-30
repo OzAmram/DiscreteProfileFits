@@ -172,6 +172,12 @@ def dofit(options):
     if(options.sig_norm_unc > 0):
         card.addSystematic("SigEff", "lnN", values = {"model_signal_m" : 1. + options.sig_norm_unc})
 
+    # Integrated-luminosity uncertainty. The background is data-driven, so this hits
+    # the signal normalization only. 1.6% for the 2024 dataset, CERN-CMS-DP-2026-003.
+    if(options.lumi_unc > 0):
+        card.addSystematic("lumi_13p6TeV", "lnN",
+                           values = {"model_signal_m" : 1. + options.lumi_unc})
+
     print("making card")
     card.makeCard()
     #card.delete()
@@ -423,6 +429,12 @@ def fitting_options():
                       of default model (gaussian core with single crystal ball)""")
     parser.add_option("--sig_norm_unc", dest="sig_norm_unc", type=float, default=-1.0,
                       help="Fractional uncertainty on signal normalization (for limits)")
+    # 2024 integrated luminosity, CERN-CMS-DP-2026-003 (https://cds.cern.ch/record/2952191).
+    # Applied as a lnN on the signal only; the background estimate is data-driven.
+    parser.add_option("--lumi_unc", dest="lumi_unc", type=float, default=0.016,
+                      help="Fractional integrated-luminosity uncertainty applied as a "
+                           "lnN on the signal yield (default 0.016 = 1.6%%, 2024, "
+                           "CERN-CMS-DP-2026-003). Set <= 0 to disable.")
     parser.add_option("--lumi", dest="lumi", default="",
                       help="Luminosity string for plot label, e.g. '27.0 fb^{-1}'")
     parser.add_option("--sqrts", dest="sqrts", default="13.6",
